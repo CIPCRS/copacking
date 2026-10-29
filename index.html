@@ -27,9 +27,11 @@ window.COPACKING_CONFIG = {
   emailDomain: "copacking.app",
   // Câte zile de jurnal se încarcă pe ecranele Operator / Supervizor (PO-urile mai vechi se văd în Arhivă)
   logWindowDays: 60,
-  // Latura maximă a pozei salvate (px) și calitatea JPEG
-  photoMaxSide: 1100,
-  photoQuality: 0.7
+  // Poze: latura maximă (px), calitatea JPEG de pornire și mărimea maximă țintă per poză (KB, așa cum e stocată în Firestore)
+  // 800 px / 0.6 → de regulă 60–120 KB per poză → ~8.000–12.000 de poze în limita gratuită de 1 GiB
+  photoMaxSide: 800,
+  photoQuality: 0.6,
+  photoMaxKB: 150
 };
 </script>
 
@@ -77,6 +79,13 @@ small,.muted{color:var(--muted)}
 .tabs button.active{background:var(--accent);color:var(--accent-text);border-color:transparent}
 
 main{padding:12px calc(12px + env(safe-area-inset-right)) 12px calc(12px + env(safe-area-inset-left));max-width:1280px;margin:0 auto}
+
+/* comutator Operator: PO nou / PO-uri active */
+.opswitch{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
+.opswitch button{min-height:56px;border-radius:12px;border:2px solid var(--line);background:var(--card);color:var(--text);font-size:17px;font-weight:700}
+.opswitch button.active{background:var(--accent);color:var(--accent-text);border-color:transparent}
+.opswitch button .cnt{display:inline-block;min-width:26px;padding:2px 8px;margin-left:6px;border-radius:999px;background:rgba(255,255,255,.25);font-size:14px}
+.opswitch button:not(.active) .cnt{background:var(--accent-soft);color:var(--accent)}
 
 /* carduri, formulare */
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:var(--shadow)}
@@ -167,6 +176,15 @@ tr.gallery-row td{white-space:normal;background:var(--bg)}
 #lightbox .cap{color:#ddd;font-size:14px;margin-top:10px;text-align:center}
 #lightbox .lb-close{position:absolute;top:calc(12px + env(safe-area-inset-top));right:12px;width:48px;height:48px;border-radius:50%;border:0;background:rgba(255,255,255,.2);color:#fff;font-size:26px}
 
+/* mesaje supervizor → operatori */
+.msgmodal .card{border:3px solid var(--accent)}
+.msgmodal .from{font-size:13px;color:var(--muted);margin-bottom:6px}
+.msgmodal .text{font-size:20px;line-height:1.35;white-space:pre-wrap;word-break:break-word;margin:6px 0 14px}
+textarea{width:100%;min-height:80px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--input);color:var(--text);font-size:16px;font-family:inherit;resize:vertical}
+.sentlist{list-style:none;padding:0;margin:10px 0 0;display:flex;flex-direction:column;gap:6px}
+.sentlist li{font-size:14px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+.sentlist li small{display:block;color:var(--muted)}
+
 /* modal */
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:250;display:flex;align-items:center;justify-content:center;padding:16px}
 .modal .card{width:100%;max-width:380px}
@@ -231,6 +249,12 @@ tr.gallery-row td{white-space:normal;background:var(--bg)}
     </div>
   </div>
 
+  <div class="opswitch">
+    <button type="button" id="swNew">＋ PO nou</button>
+    <button type="button" id="swActive">PO-uri active <span class="cnt" id="swActiveCnt">0</span></button>
+  </div>
+
+  <div id="paneNew">
   <h2>PO nou</h2>
   <form class="card" id="newPoForm" autocomplete="off">
     <div class="row2">
@@ -252,10 +276,12 @@ tr.gallery-row td{white-space:normal;background:var(--bg)}
     <div class="hint" id="npHint">Țintă: –</div>
     <button class="btn primary block" type="submit">Pornește PO</button>
   </form>
+  </div>
 
+  <div id="paneActive" class="hidden">
   <h2>PO-uri active <small id="activeCount"></small></h2>
   <div class="grid" id="cards"></div>
-  <div class="empty hidden" id="cardsEmpty">Niciun PO activ. Pornește unul din formularul de mai sus.</div>
+  <div class="empty hidden" id="cardsEmpty">Niciun PO activ. Apasă „PO nou” pentru a porni unul.</div>
 
   <h2>Istoric verificări</h2>
   <div class="toolbar">
@@ -263,10 +289,27 @@ tr.gallery-row td{white-space:normal;background:var(--bg)}
     <small id="histInfo"></small>
   </div>
   <ul class="hist" id="history"></ul>
+  </div>
 </section>
 
 <!-- ===================== SUPERVIZOR ===================== -->
 <section id="screen-supervizor" class="hidden">
+  <form class="card" id="msgForm" autocomplete="off" style="margin-bottom:12px">
+    <h3>Mesaj către operatori</h3>
+    <div class="row2">
+      <label class="field">Destinatar
+        <select id="msgTo"><option value="all">Toți operatorii</option></select>
+      </label>
+      <label class="field">Expeditor
+        <input type="text" id="msgFrom" readonly>
+      </label>
+    </div>
+    <label class="field">Mesaj
+      <textarea id="msgText" maxlength="500" required placeholder="ex. Opriți PO 4512 – verificați paletul 3"></textarea>
+    </label>
+    <button class="btn primary block" type="submit" id="msgSend">Trimite mesajul</button>
+    <ul class="sentlist" id="sentList"></ul>
+  </form>
   <div class="kpis" id="kpis"></div>
   <div class="toolbar">
     <div class="filters" id="supFilters">
@@ -334,6 +377,15 @@ tr.gallery-row td{white-space:normal;background:var(--bg)}
 
 </main>
 
+<div id="msgModal" class="modal msgmodal hidden">
+  <div class="card">
+    <h3>📣 Mesaj de la supervizor</h3>
+    <div class="from" id="msgModalFrom"></div>
+    <div class="text" id="msgModalText"></div>
+    <button type="button" class="btn primary block" id="msgAck">Am citit</button>
+  </div>
+</div>
+
 <div id="pinModal" class="modal hidden">
   <form class="card" id="pinForm" autocomplete="off">
     <h3>Schimbă PIN-ul</h3>
@@ -389,7 +441,8 @@ const state = {
   logs: [], pos: [], archive: [], users: [],
   view: "operator", supFilter: "all",
   expanded: new Set(), arqExpanded: new Set(),
-  pendingSid: null, unsub: {}, photoCache: new Map(), interval: null
+  pendingSid: null, unsub: {}, photoCache: new Map(), interval: null,
+  messages: [], msgQueue: [], msgShowing: null
 };
 
 /* ------------------------------------------------------------------ */
@@ -533,7 +586,7 @@ function setView(v) {
   $("#screen-login").classList.add("hidden");
   renderTabs();
   if (v === "operator") renderOperator();
-  if (v === "supervizor") renderSupervisor();
+  if (v === "supervizor") { renderSupervisor(); renderSentList(); }
   if (v === "arhiva") { subscribeArchive(); renderArchive(); }
   if (v === "utilizatori") { subscribeUsers(); renderUsers(); }
 }
@@ -600,7 +653,7 @@ function showLogin() {
 onAuthStateChanged(auth, user => {
   unsubAll();
   state.user = user; state.profile = null;
-  state.logs = []; state.pos = []; state.archive = []; state.users = [];
+  state.logs = []; state.pos = []; state.archive = []; state.users = []; state.messages = []; state.msgQueue = []; state.msgShowing = null; $("#msgModal").classList.add("hidden");
   if (!user) { showLogin(); return; }
   state.unsub.profile = onSnapshot(doc(db, "users", user.uid), { includeMetadataChanges: true }, snap => {
     const d = snap.exists() ? snap.data() : null;
@@ -624,6 +677,9 @@ function enterApp() {
   $("#btnPin").classList.remove("hidden");
   subscribeSettings();
   subscribeLogs();
+  subscribeMessages();
+  if (canSup()) subscribeUsers();
+  $("#msgFrom").value = state.profile.name;
   setView(viewFromHash());
 }
 
@@ -634,6 +690,7 @@ function subscribeLogs() {
   const cutoff = Date.now() - LOG_WINDOW_MS;
   const q = query(collection(db, "logs"), where("ts", ">=", cutoff), orderBy("ts"));
   state.unsub.logs = onSnapshot(q, { includeMetadataChanges: false }, snap => {
+    if (!state.user) return;
     state.logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     state.pos = buildPOs(state.logs);
     if (state.view === "operator") renderOperator();
@@ -734,13 +791,27 @@ $("#newPoForm").addEventListener("submit", async e => {
     if (used) return showMsg(used + " Un PO nu poate fi pornit a doua oară.");
     fire(addDoc(collection(db, "logs"), { type: "start", ts: Date.now(), shift: getShift(), op: state.profile.name, uid: state.user.uid, po, art, qty, pct }), `PO ${po} pornit.`);
     $("#newPoForm").reset(); $("#npPct").value = 5; updateNpHint();
+    setPane("active");
   } finally { btn.disabled = false; btn.textContent = "Pornește PO"; }
 });
 
 const cardsEl = $("#cards");
+let opPane = localStorage.getItem("cp_pane") || "active";
+function setPane(p) {
+  opPane = p; localStorage.setItem("cp_pane", p);
+  $("#paneNew").classList.toggle("hidden", p !== "new");
+  $("#paneActive").classList.toggle("hidden", p !== "active");
+  $("#swNew").classList.toggle("active", p === "new");
+  $("#swActive").classList.toggle("active", p === "active");
+  if (p === "new") setTimeout(() => $("#npPo").focus(), 50);
+}
+$("#swNew").addEventListener("click", () => setPane("new"));
+$("#swActive").addEventListener("click", () => setPane("active"));
+setPane(opPane);
 function renderOperator() {
   const active = state.pos.filter(p => !p.end);
   $("#activeCount").textContent = active.length ? `(${active.length})` : "";
+  $("#swActiveCnt").textContent = active.length;
   $("#cardsEmpty").classList.toggle("hidden", active.length > 0);
   const keep = new Set(active.map(p => p.sid));
   for (const c of $$(".po", cardsEl)) if (!keep.has(c.dataset.sid)) c.remove();
@@ -906,8 +977,8 @@ cameraInput.addEventListener("change", async () => {
     const pref = doc(collection(db, "photos"));
     const ts = Date.now();
     fire(setDoc(pref, { data: img.full, ts, uid: state.user.uid, po: p.po, sid: p.sid }));
-    fire(addDoc(collection(db, "logs"), { type: "photo", ...baseEvent(p), ts, n: f.n, code: f.code, note: f.note, asset: pref.id, url: img.thumb }),
-      `PO ${p.po}: poză salvată, +${f.n} verificate` + (img.code ? ` · cod ${img.code}` : "") + ".");
+    fire(addDoc(collection(db, "logs"), { type: "photo", ...baseEvent(p), ts, n: f.n, code: f.code, note: f.note, asset: pref.id, url: img.thumb, bytes: img.full.length }),
+      `PO ${p.po}: poză salvată (${Math.round(img.full.length / 1024)} KB), +${f.n} verificate` + (img.code ? ` · cod ${img.code}` : "") + ".");
     state.photoCache.set(pref.id, img.full);
     clearCheckFields(card);
   } catch (e) {
@@ -928,12 +999,18 @@ async function loadBitmap(file) {
 async function processImage(file) {
   const bmp = await loadBitmap(file);
   const w = bmp.width, h = bmp.height;
-  const maxSide = CFG.photoMaxSide || 1100;
-  const s = Math.min(1, maxSide / Math.max(w, h));
-  const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(w * s)); c.height = Math.max(1, Math.round(h * s));
-  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
-  let q = CFG.photoQuality || 0.7, full = c.toDataURL("image/jpeg", q);
-  while (full.length > 900000 && q > 0.3) { q -= 0.1; full = c.toDataURL("image/jpeg", q); }   // sub limita de 1 MB/document Firestore
+  let maxSide = CFG.photoMaxSide || 800;
+  const maxLen = (CFG.photoMaxKB || 150) * 1024;         // mărimea data-URL-ului, adică exact ce ocupă în Firestore
+  let c, full, q;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const s = Math.min(1, maxSide / Math.max(w, h));
+    c = document.createElement("canvas"); c.width = Math.max(1, Math.round(w * s)); c.height = Math.max(1, Math.round(h * s));
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    q = CFG.photoQuality || 0.6; full = c.toDataURL("image/jpeg", q);
+    while (full.length > maxLen && q > 0.4) { q = Math.round((q - 0.05) * 100) / 100; full = c.toDataURL("image/jpeg", q); }   // întâi scădem calitatea
+    if (full.length <= maxLen) break;
+    maxSide = Math.round(maxSide * 0.8);                 // apoi micșorăm rezoluția și reluăm
+  }
   const ts = Math.min(1, 128 / Math.max(c.width, c.height));
   const t = document.createElement("canvas"); t.width = Math.max(1, Math.round(c.width * ts)); t.height = Math.max(1, Math.round(c.height * ts));
   t.getContext("2d").drawImage(c, 0, 0, t.width, t.height);
@@ -1023,12 +1100,17 @@ function renderSupervisor() {
   const active = all.filter(p => !p.end), closed = all.filter(p => p.end);
   const idle = active.filter(p => now - p.last > interval);
   const totalVer = all.reduce((s, p) => s + p.verified, 0);
+  const photoEvents = state.logs.filter(l => l.type === "photo");
+  const knownBytes = photoEvents.reduce((s, l) => s + (Number(l.bytes) || 0), 0), knownCount = photoEvents.filter(l => l.bytes).length;
+  const avg = knownCount ? knownBytes / knownCount : 250 * 1024;
+  const estMB = (knownBytes + (photoEvents.length - knownCount) * avg) / 1048576;
   const k = $("#kpis"); k.textContent = "";
   k.append(
     el("div", { class: "kpi" }, el("b", {}, active.length), el("span", {}, "PO-uri active")),
     el("div", { class: "kpi" }, el("b", {}, closed.length), el("span", {}, `PO-uri închise (${CFG.logWindowDays || 60} zile)`)),
     el("div", { class: "kpi" + (idle.length ? " warn" : "") }, el("b", {}, idle.length), el("span", {}, `fără activitate > ${getInterval()} min`)),
-    el("div", { class: "kpi" }, el("b", {}, totalVer), el("span", {}, "piese verificate total")));
+    el("div", { class: "kpi" }, el("b", {}, totalVer), el("span", {}, "piese verificate total")),
+    el("div", { class: "kpi" + (estMB > 700 ? " warn" : "") }, el("b", {}, estMB < 10 ? estMB.toFixed(1) : Math.round(estMB)), el("span", {}, `MB poze în ${CFG.logWindowDays || 60} zile (limită gratuită ≈ 1000 MB total)`)));
   const list = state.supFilter === "active" ? active : state.supFilter === "closed" ? closed : all;
   $("#supInfo").textContent = `${list.length} PO-uri · actualizat ${fmtTime(now)}`;
   const tb = $("#supTable tbody"); tb.textContent = "";
@@ -1054,6 +1136,7 @@ function subscribeArchive() {
   if (state.unsub.archive) return;
   const q = query(collection(db, "archive"), orderBy("end", "desc"), limit(1000));
   state.unsub.archive = onSnapshot(q, snap => {
+    if (!state.user) return;
     state.archive = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (state.view === "arhiva") renderArchive();
   }, err => showMsg("Eroare la citirea arhivei: " + errText(err)));
@@ -1122,8 +1205,11 @@ $("#btnImportArchive").addEventListener("click", async () => {
 function subscribeUsers() {
   if (state.unsub.users) return;
   state.unsub.users = onSnapshot(query(collection(db, "users"), orderBy("name")), snap => {
+    if (!state.user) return;
     state.users = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+    renderMsgRecipients();
     if (state.view === "utilizatori") renderUsers();
+    if (state.view === "supervizor") renderSentList();
   }, err => showMsg("Eroare la citirea utilizatorilor: " + errText(err)));
 }
 $("#uName").addEventListener("input", () => { const l = nameToLogin($("#uName").value); $("#uHint").innerHTML = ""; $("#uHint").append("Autentificare cu numele: ", el("b", {}, l || "–"), ` (cont intern ${l || "…"}@${DOMAIN})`); });
@@ -1171,6 +1257,65 @@ function renderUsers() {
       el("span", { class: "uname" }, u.name, self ? " (tu)" : ""), el("span", { class: "pill" }, u.login || ""), roleSel, tog));
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Mesaje supervizor → operatori (colecția messages)                   */
+/* ------------------------------------------------------------------ */
+const MSG_WINDOW_MS = 24 * 3600000;
+function subscribeMessages() {
+  const q = query(collection(db, "messages"), where("ts", ">=", Date.now() - MSG_WINDOW_MS), orderBy("ts"));
+  state.unsub.messages = onSnapshot(q, snap => {
+    if (!state.user) return;
+    state.messages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const me = state.user.uid;
+    for (const m of state.messages) {
+      const forMe = m.to === "all" || m.to === me;
+      const seen = m.ack && m.ack[me];
+      if (forMe && !seen && m.fromUid !== me && !state.msgQueue.some(x => x.id === m.id) && (!state.msgShowing || state.msgShowing.id !== m.id)) state.msgQueue.push(m);
+    }
+    showNextMessage();
+    if (state.view === "supervizor") renderSentList();
+  }, err => console.warn("messages:", err));
+}
+function showNextMessage() {
+  if (state.msgShowing || !state.msgQueue.length) return;
+  const m = state.msgQueue.shift(); state.msgShowing = m;
+  $("#msgModalFrom").textContent = `${m.from || "Supervizor"} · ${fmtDT(m.ts)}` + (m.to === "all" ? " · către toți" : "");
+  $("#msgModalText").textContent = m.text || "";
+  $("#msgModal").classList.remove("hidden");
+  beep(); try { if (navigator.vibrate) navigator.vibrate([300, 100, 300]); } catch (_) {}
+}
+$("#msgAck").addEventListener("click", () => {
+  const m = state.msgShowing; if (!m) return;
+  fire(updateDoc(doc(db, "messages", m.id), { [`ack.${state.user.uid}`]: Date.now() }));
+  if (!m.ack) m.ack = {}; m.ack[state.user.uid] = Date.now();
+  $("#msgModal").classList.add("hidden"); state.msgShowing = null;
+  setTimeout(showNextMessage, 300);
+});
+function renderMsgRecipients() {
+  const sel = $("#msgTo"); const cur = sel.value;
+  sel.textContent = "";
+  sel.append(el("option", { value: "all" }, "Toți operatorii"));
+  for (const u of state.users.filter(u => u.active && u.uid !== state.user.uid)) sel.append(el("option", { value: u.uid }, `${u.name} (${u.role})`));
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+}
+function renderSentList() {
+  const ul = $("#sentList"); ul.textContent = "";
+  const mine = [...state.messages].reverse().slice(0, 8);
+  const nameOf = uid => (state.users.find(u => u.uid === uid) || {}).name || uid.slice(0, 6);
+  for (const m of mine) {
+    const acks = Object.keys(m.ack || {});
+    ul.append(el("li", {}, `${m.text}`, el("small", {}, `${fmtDT(m.ts)} · ${m.from} → ${m.to === "all" ? "toți" : nameOf(m.to)} · citit de: ${acks.length ? acks.map(nameOf).join(", ") : "nimeni încă"}`)));
+  }
+}
+$("#msgForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const text = $("#msgText").value.trim(); if (!text) return showMsg("Scrie mesajul.");
+  const to = $("#msgTo").value;
+  fire(addDoc(collection(db, "messages"), { text, to, from: state.profile.name, fromUid: state.user.uid, ts: Date.now(), ack: {} }),
+    `Mesaj trimis ${to === "all" ? "tuturor operatorilor" : "către " + $("#msgTo").selectedOptions[0].textContent}.`);
+  $("#msgText").value = "";
+});
 
 /* ------------------------------------------------------------------ */
 /* Reîmprospătare periodică (cronometre, stări „fără activitate”)      */
