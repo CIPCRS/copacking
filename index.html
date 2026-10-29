@@ -342,7 +342,7 @@ textarea{width:100%;min-height:80px;padding:10px;border:1px solid var(--line);bo
   <div class="tablewrap" style="margin-top:8px">
     <table id="arqTable">
       <thead><tr>
-        <th>PO</th><th>Articol</th><th>Tură / operatori</th><th>Start</th><th>Închis</th><th>Durată</th><th>Verificat</th><th>Poze</th>
+        <th>PO</th><th>Articol</th><th>Tură / operatori</th><th>Start</th><th>Închis</th><th>Durată</th><th>Verificat</th><th>Poze</th><th id="arqActTh" class="hidden"></th>
       </tr></thead>
       <tbody></tbody>
     </table>
@@ -709,7 +709,7 @@ function buildPOs(logs) {
     p.last = Math.max(p.last, l.ts); if (l.op) p.ops.add(l.op);
     if (l.type === "photo") { p.photos.push(l); p.verified += Number(l.n) || 0; p.lastPhoto = Math.max(p.lastPhoto, l.ts); }
     else if (l.type === "check") { p.checks.push(l); p.verified += Number(l.n) || 0; }
-    else if (l.type === "end") { p.end = l.ts; p.endBy = l.op || ""; }
+    else if (l.type === "end") { p.end = l.ts; p.endBy = l.op || ""; p.forced = !!l.forced; }
   }
   for (const p of map.values()) { p.target = calcTarget(p.qty, p.pct); p.photos.sort((a, b) => a.ts - b.ts); }
   return [...map.values()].sort((a, b) => b.start - a.start);
@@ -876,13 +876,15 @@ function updateCard(card, p) {
   hint.textContent = lock ? `Primele ${MIN_PHOTO_PIECES} piese necesită câte o poză fiecare (${p.verified}/${MIN_PHOTO_PIECES}).` : "Poți salva verificări și fără poză; câmpul de bucăți e editabil.";
   hint.classList.toggle("lock", lock);
   $(".b-check", card).classList.toggle("hidden", lock);
-  const cm = $(".dyn-close", card), done = p.verified >= p.target;
-  cm.textContent = done ? "Țintă atinsă – PO-ul poate fi închis." : `Închiderea e blocată: mai sunt necesare ${p.target - p.verified} piese verificate (țintă ${p.target}).`;
+  const cm = $(".dyn-close", card), done = p.verified >= p.target, admin = isAdmin();
+  cm.textContent = done ? "Țintă atinsă – PO-ul poate fi închis."
+    : `Închiderea e blocată: mai sunt necesare ${p.target - p.verified} piese verificate (țintă ${p.target}).` + (admin ? " Ca administrator poți închide forțat." : "");
   cm.classList.toggle("ok", done);
   const bc = $(".b-close", card);
-  bc.disabled = !done;
+  bc.disabled = !done && !admin;
+  if (bc.dataset.armed !== "1") bc.textContent = done ? "Închide PO" : (admin ? "Închide PO forțat (admin)" : "Închide PO");
   $(".b-del", card).classList.toggle("hidden", !isAdmin());
-  if (!done && bc.dataset.armed === "1") disarm(bc);
+  if (!done && !admin && bc.dataset.armed === "1") disarm(bc);
 }
 function updateCardsDyn() {
   for (const p of state.pos) {
@@ -1029,20 +1031,22 @@ async function processImage(file) {
 /* închidere PO (confirmare prin două apăsări) */
 function disarm(btn) { btn.dataset.armed = ""; btn.classList.remove("armed"); btn.textContent = "Închide PO"; clearTimeout(btn._t); }
 function closePO(p, btn) {
-  if (p.verified < p.target) return showMsg(`Nu poți închide PO ${p.po}: ${p.verified}/${p.target} piese verificate.`);
-  if (btn.dataset.armed === "1") { disarm(btn); doClose(p); return; }
-  btn.dataset.armed = "1"; btn.classList.add("armed"); btn.textContent = "Apasă din nou pentru a confirma închiderea";
+  const forced = p.verified < p.target;
+  if (forced && !isAdmin()) return showMsg(`Nu poți închide PO ${p.po}: ${p.verified}/${p.target} piese verificate.`);
+  if (btn.dataset.armed === "1") { disarm(btn); doClose(p, forced); return; }
+  btn.dataset.armed = "1"; btn.classList.add("armed");
+  btn.textContent = forced ? `Apasă din nou – închidere forțată la ${p.verified}/${p.target}` : "Apasă din nou pentru a confirma închiderea";
   clearTimeout(btn._t); btn._t = setTimeout(() => disarm(btn), 5000);
 }
-function archiveFromPO(p, endTs, endBy) {
+function archiveFromPO(p, endTs, endBy, forced) {
   const photos = p.photos.slice(0, 150).map(x => ({ id: x.asset || "", url: x.url || "", ts: x.ts, code: x.code || "", n: Number(x.n) || 0, op: x.op || "" }));
   return { po: p.po, article: p.art, shift: p.shift, operators: [...p.ops], qty: p.qty, pct: p.pct, start: p.start, end: endTs,
-    verified: p.verified, target: p.target, photos, count: p.photos.length, checks: p.checks.length, closedBy: endBy, sid: p.sid };
+    verified: p.verified, target: p.target, photos, count: p.photos.length, checks: p.checks.length, closedBy: endBy, sid: p.sid, forced: !!(forced ?? p.forced) };
 }
-function doClose(p) {
+function doClose(p, forced = false) {
   const endTs = Date.now();
-  fire(addDoc(collection(db, "logs"), { type: "end", ...baseEvent(p), ts: endTs }), `PO ${p.po} închis.`);
-  fire(setDoc(doc(db, "archive", p.sid), archiveFromPO(p, endTs, state.profile.name)));
+  fire(addDoc(collection(db, "logs"), { type: "end", ...baseEvent(p), ts: endTs, forced }), forced ? `PO ${p.po} închis forțat (${p.verified}/${p.target}).` : `PO ${p.po} închis.`);
+  fire(setDoc(doc(db, "archive", p.sid), archiveFromPO(p, endTs, state.profile.name, forced)));
 }
 
 /* ștergere PO deschis – doar administratori: șterge evenimentul de start, toate evenimentele și pozele PO-ului */
@@ -1058,6 +1062,29 @@ async function deleteOpenPO(p) {
     alertLevels.delete(p.sid);
     showMsg(`PO ${p.po} a fost șters (${evs.size} evenimente${evs.docs.filter(d => d.data().asset).length ? ", inclusiv pozele" : ""}).`, "info");
   } catch (e) { showMsg("Ștergerea a eșuat: " + errText(e)); }
+}
+/* ștergere PO închis din arhivă – doar administratori: șterge documentul din archive + toate evenimentele și pozele din jurnal */
+async function deleteArchivedPO(a) {
+  if (!isAdmin()) return showMsg("Doar un administrator poate șterge un PO din arhivă.");
+  try {
+    const sid = a.sid || a.id;
+    const evs = await getDocs(query(collection(db, "logs"), where("sid", "==", sid)));
+    const jobs = [];
+    const assets = new Set();
+    for (const d of evs.docs) { const l = d.data(); if (l.asset) assets.add(l.asset); jobs.push(deleteDoc(d.ref)); }
+    for (const ph of a.photos || []) if (ph.id) assets.add(ph.id);
+    for (const id of assets) jobs.push(deleteDoc(doc(db, "photos", id)).catch(() => {}));
+    jobs.push(deleteDoc(doc(db, "logs", sid)).catch(() => {}));
+    jobs.push(deleteDoc(doc(db, "archive", a.id)));
+    await Promise.all(jobs);
+    for (const id of assets) state.photoCache.delete(id);
+    showMsg(`PO ${a.po} a fost șters din arhivă împreună cu ${assets.size} poze.`, "info");
+  } catch (e) { showMsg("Ștergerea a eșuat: " + errText(e)); }
+}
+function armDeleteArchived(btn, a) {
+  if (btn.dataset.armed === "1") { btn.dataset.armed = ""; btn.classList.remove("armed"); btn.textContent = "🗑 Șterge"; clearTimeout(btn._t); btn.disabled = true; deleteArchivedPO(a).finally(() => { btn.disabled = false; }); return; }
+  btn.dataset.armed = "1"; btn.classList.add("armed"); btn.textContent = "Apasă din nou – se șterg PO-ul și pozele";
+  clearTimeout(btn._t); btn._t = setTimeout(() => { btn.dataset.armed = ""; btn.classList.remove("armed"); btn.textContent = "🗑 Șterge"; }, 5000);
 }
 function armDelete(btn, p) {
   if (btn.dataset.armed === "1") { btn.dataset.armed = ""; btn.classList.remove("armed"); btn.textContent = "🗑 Șterge PO"; clearTimeout(btn._t); btn.disabled = true; deleteOpenPO(p).finally(() => { btn.disabled = false; }); return; }
@@ -1140,14 +1167,16 @@ function renderSupervisor() {
   if (!list.length) { tb.append(el("tr", {}, el("td", { colspan: 8, class: "empty" }, "Nimic de afișat."))); return; }
   for (const p of list) {
     let status;
-    if (p.end) status = el("span", { class: "status done" }, `Închis · ${fmtDur(p.end - p.start)}`);
+    if (p.end) status = el("span", { class: "status " + (p.forced ? "warn" : "done") }, `Închis${p.forced ? " forțat" : ""} · ${fmtDur(p.end - p.start)}`);
     else if (now - p.last > interval) status = el("span", { class: "status warn" }, `⚠ Fără activitate de ${minutes(now - p.last)} min`);
     else status = el("span", { class: "status run" }, "În lucru");
     const statusCell = el("td", {}, status);
     if (!p.end && isAdmin()) {
-      const del = el("button", { type: "button", class: "btn small", style: "margin-left:8px;color:var(--danger)" }, "🗑 Șterge PO");
+      const cls = el("button", { type: "button", class: "btn small", style: "margin-left:8px" }, p.verified >= p.target ? "Închide" : "Închide forțat");
+      cls.addEventListener("click", ev => { ev.stopPropagation(); closePO(p, cls); });
+      const del = el("button", { type: "button", class: "btn small", style: "margin-left:6px;color:var(--danger)" }, "🗑 Șterge PO");
       del.addEventListener("click", ev => { ev.stopPropagation(); armDelete(del, p); });
-      statusCell.append(del);
+      statusCell.append(cls, del);
     }
     const tr = el("tr", { class: "rowpo" + (state.expanded.has(p.sid) ? " open" : ""), dataset: { sid: p.sid } },
       el("td", {}, el("b", {}, p.po)), el("td", {}, p.art), el("td", {}, `${p.shift} · ${[...p.ops].join(", ")}`), el("td", {}, fmtDT(p.start)),
@@ -1187,21 +1216,28 @@ function renderArchive() {
   const list = archiveFiltered();
   $("#arqInfo").textContent = `${list.length} din ${state.archive.length} PO-uri arhivate`;
   const tb = $("#arqTable tbody"); tb.textContent = "";
-  if (!list.length) { tb.append(el("tr", {}, el("td", { colspan: 8, class: "empty" }, "Nimic de afișat."))); return; }
+  const admin = isAdmin();
+  $("#arqActTh").classList.toggle("hidden", !admin); $("#arqActTh").textContent = admin ? "Admin" : "";
+  if (!list.length) { tb.append(el("tr", {}, el("td", { colspan: admin ? 9 : 8, class: "empty" }, "Nimic de afișat."))); return; }
   for (const a of list) {
     const tr = el("tr", { class: "rowpo" + (state.arqExpanded.has(a.id) ? " open" : "") },
       el("td", {}, el("b", {}, a.po)), el("td", {}, a.article || ""), el("td", {}, `${a.shift || ""} · ${(a.operators || []).join(", ")}`),
       el("td", {}, fmtDT(a.start)), el("td", {}, fmtDT(a.end)), el("td", {}, fmtDur(a.end - a.start)),
-      el("td", {}, `${a.verified}/${a.target} · ${a.qty} buc · ${a.pct}%`), el("td", {}, a.count ?? (a.photos || []).length));
+      el("td", {}, `${a.verified}/${a.target} · ${a.qty} buc · ${a.pct}%`, a.forced ? el("span", { class: "status warn", style: "margin-left:6px" }, "închis forțat") : null), el("td", {}, a.count ?? (a.photos || []).length));
+    if (admin) {
+      const del = el("button", { type: "button", class: "btn small", style: "color:var(--danger)" }, "🗑 Șterge");
+      del.addEventListener("click", ev => { ev.stopPropagation(); armDeleteArchived(del, a); });
+      tr.append(el("td", {}, del));
+    }
     tr.addEventListener("click", () => { state.arqExpanded.has(a.id) ? state.arqExpanded.delete(a.id) : state.arqExpanded.add(a.id); renderArchive(); });
     tb.append(tr);
-    if (state.arqExpanded.has(a.id)) tb.append(el("tr", { class: "gallery-row" }, el("td", { colspan: 8 }, galleryFor(a.photos || [], "PO " + a.po))));
+    if (state.arqExpanded.has(a.id)) tb.append(el("tr", { class: "gallery-row" }, el("td", { colspan: admin ? 9 : 8 }, galleryFor(a.photos || [], "PO " + a.po))));
   }
 }
 $("#btnCsvArchive").addEventListener("click", () => {
-  const rows = [["PO", "Articol", "Tura", "Operatori", "Start", "Inchis", "Durata (min)", "Cantitate", "Procent", "Tinta", "Verificat", "Poze", "Verificari fara poza", "Inchis de"]];
+  const rows = [["PO", "Articol", "Tura", "Operatori", "Start", "Inchis", "Durata (min)", "Cantitate", "Procent", "Tinta", "Verificat", "Poze", "Verificari fara poza", "Inchis de", "Inchis fortat"]];
   for (const a of archiveFiltered()) rows.push([a.po, a.article || "", a.shift || "", (a.operators || []).join(", "), fmtDTfull(a.start), fmtDTfull(a.end),
-    minutes((a.end || 0) - (a.start || 0)), a.qty, a.pct, a.target, a.verified, a.count ?? (a.photos || []).length, a.checks ?? "", a.closedBy || ""]);
+    minutes((a.end || 0) - (a.start || 0)), a.qty, a.pct, a.target, a.verified, a.count ?? (a.photos || []).length, a.checks ?? "", a.closedBy || "", a.forced ? "DA" : ""]);
   csvDownload(`copacking_arhiva_${new Date().toISOString().slice(0, 10)}.csv`, rows);
 });
 $("#btnImportArchive").addEventListener("click", async () => {
