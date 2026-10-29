@@ -1,0 +1,80 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- funcții ajutătoare ----------
+    function signedIn() {
+      return request.auth != null;
+    }
+    function userPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+    // Auto-înregistrarea NU dă acces: trebuie să existe users/{uid} cu active == true
+    function isActive() {
+      return signedIn() && exists(userPath()) && get(userPath()).data.active == true;
+    }
+    function role() {
+      return get(userPath()).data.role;
+    }
+    function isAdmin() {
+      return isActive() && role() == 'admin';
+    }
+    function isSupervisor() {
+      return isActive() && (role() == 'supervisor' || role() == 'admin');
+    }
+
+    // ---------- users/{uid} ----------
+    match /users/{uid} {
+      // oricine e autentificat își poate citi PROPRIUL document (aplicația verifică dacă e activ)
+      allow get: if signedIn() && request.auth.uid == uid;
+      // lista completă: doar supervizori / admini
+      allow list: if isSupervisor();
+      // scriere: doar admin; un admin nu se poate dezactiva pe sine
+      allow create: if isAdmin()
+                    && request.resource.data.role in ['operator', 'supervisor', 'admin']
+                    && request.resource.data.active is bool
+                    && request.resource.data.name is string;
+      allow update: if isAdmin()
+                    && request.resource.data.role in ['operator', 'supervisor', 'admin']
+                    && !(uid == request.auth.uid && request.resource.data.active == false);
+      allow delete: if isAdmin();
+    }
+
+    // ---------- logs/{id} : evenimente start / photo / check / end ----------
+    match /logs/{id} {
+      allow read: if isActive();
+      allow create: if isActive()
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.type in ['start', 'photo', 'check', 'end']
+                    && request.resource.data.ts is number;
+      // singura modificare permisă: cantitatea totală și procentul pe evenimentul de start
+      allow update: if isActive()
+                    && resource.data.type == 'start'
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['qty', 'pct']);
+      allow delete: if isAdmin();
+    }
+
+    // ---------- photos/{id} : poza completă (data URL) ----------
+    match /photos/{id} {
+      allow read: if isActive();
+      allow create: if isActive()
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.data is string;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // ---------- archive/{sid} : rezumatul unui PO închis ----------
+    match /archive/{id} {
+      allow read: if isActive();
+      allow create: if isActive();
+      allow update: if isSupervisor();
+      allow delete: if isAdmin();
+    }
+
+    // orice altceva: interzis
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,1048 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#1e5aa8">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Copacking">
+<title>Copacking – Jurnal verificări</title>
+
+<!-- ============================================================
+     CONFIGURARE – completează cu datele proiectului tău Firebase
+     (Firebase Console → Project settings → Your apps → Web app → SDK setup and configuration)
+     ============================================================ -->
+<script>
+window.COPACKING_CONFIG = {
+  firebase: {
+    apiKey:            "LIPESTE_AICI_apiKey",
+    authDomain:        "LIPESTE_AICI_projectId.firebaseapp.com",
+    projectId:         "LIPESTE_AICI_projectId",
+    appId:             "LIPESTE_AICI_appId"
+  },
+  // Domeniul fictiv folosit pentru conturi: nume + PIN  ->  nume@copacking.app
+  emailDomain: "copacking.app",
+  // Câte zile de jurnal se încarcă pe ecranele Operator / Supervizor (PO-urile mai vechi se văd în Arhivă)
+  logWindowDays: 60,
+  // Latura maximă a pozei salvate (px) și calitatea JPEG
+  photoMaxSide: 1100,
+  photoQuality: 0.7
+};
+</script>
+
+<style>
+:root{
+  --bg:#f3f5f8;--card:#ffffff;--text:#1b1f24;--muted:#6b7280;--line:#e2e6ec;
+  --accent:#1e5aa8;--accent-text:#ffffff;--accent-soft:#e6eefb;
+  --ok:#1a9a5a;--ok-bg:#e4f6ec;--warn:#d9780f;--warn-bg:#fff1dd;
+  --danger:#d43f3f;--danger-bg:#fde8e8;--danger-dark:#8f1f1f;
+  --input:#ffffff;--shadow:0 1px 3px rgba(0,0,0,.08);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0f1419;--card:#1a2129;--text:#e6e9ee;--muted:#98a2b3;--line:#2b3440;
+    --accent:#5b9cf0;--accent-text:#0b1220;--accent-soft:#1c2a3d;
+    --ok:#3ccf85;--ok-bg:#153324;--warn:#f0a040;--warn-bg:#3a2a12;
+    --danger:#f06464;--danger-bg:#3b1b1b;--danger-dark:#5a1b1b;
+    --input:#0f151c;--shadow:none;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%}
+body{padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+.hidden{display:none!important}
+button{font-family:inherit;cursor:pointer}
+h2{font-size:18px;margin:18px 0 10px}
+h3{font-size:15px;margin:0 0 8px}
+small,.muted{color:var(--muted)}
+
+/* bara de mesaje (fixă, sus) */
+.msgbar{position:fixed;top:calc(8px + env(safe-area-inset-top));left:12px;right:12px;z-index:200;display:flex;align-items:flex-start;gap:8px;padding:12px 12px 12px 14px;border-radius:12px;font-size:15px;line-height:1.35;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.msgbar.error{background:var(--danger);color:#fff}
+.msgbar.info{background:var(--ok);color:#fff}
+.msgbar.warn{background:var(--warn);color:#fff}
+.msgbar span{flex:1}
+.msgbar .msg-close{background:rgba(255,255,255,.2);color:#fff;border:0;border-radius:8px;width:36px;height:36px;font-size:20px;line-height:1;flex:none}
+
+/* header + tab-uri */
+.topbar{position:sticky;top:0;z-index:20;background:var(--accent);color:#fff;padding:calc(8px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 8px calc(12px + env(safe-area-inset-left));display:flex;align-items:center;gap:10px}
+.topbar h1{font-size:17px;margin:0;flex:1;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar .who{font-size:13px;opacity:.92;white-space:nowrap}
+.topbar button{background:rgba(255,255,255,.18);color:#fff;border:0;border-radius:8px;min-height:40px;padding:0 12px;font-size:14px;font-weight:600}
+.tabs{display:flex;gap:6px;padding:8px calc(12px + env(safe-area-inset-right)) 8px calc(12px + env(safe-area-inset-left));overflow-x:auto;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:19}
+.tabs button{flex:none;min-height:44px;padding:0 16px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);font-size:15px;font-weight:600}
+.tabs button.active{background:var(--accent);color:var(--accent-text);border-color:transparent}
+
+main{padding:12px calc(12px + env(safe-area-inset-right)) 12px calc(12px + env(safe-area-inset-left));max-width:1280px;margin:0 auto}
+
+/* carduri, formulare */
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:var(--shadow)}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr))}
+.field{display:block;font-size:13px;color:var(--muted);margin-bottom:10px}
+.field > input,.field > select{margin-top:4px}
+input,select{width:100%;min-height:46px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--input);color:var(--text);font-size:16px;font-family:inherit}
+input:disabled{opacity:.6}
+input[readonly]{background:var(--bg)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+@media (max-width:420px){.row3{grid-template-columns:1fr 1fr}}
+.btn{min-height:46px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);font-size:15px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn.primary{background:var(--accent);color:var(--accent-text);border-color:transparent}
+.btn.danger{background:var(--danger);color:#fff;border-color:transparent}
+.btn.danger.armed{background:var(--danger-dark);animation:pulse 1s infinite}
+.btn.small{min-height:38px;font-size:14px;padding:0 10px}
+.btn.block{width:100%}
+.btn:disabled{opacity:.45;cursor:not-allowed;animation:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.75}}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}
+.actions .btn{flex:1;min-width:140px}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0 12px}
+.toolbar .btn{flex:none}
+.toolbar input,.toolbar select{width:auto;min-width:120px;flex:1}
+.filters{display:flex;gap:6px;flex-wrap:wrap}
+.filters button{min-height:40px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--text);font-weight:600}
+.filters button.active{background:var(--accent);color:var(--accent-text);border-color:transparent}
+
+/* card PO */
+.po-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:6px}
+.po-num{font-size:18px;font-weight:700}
+.po-art{font-size:14px;color:var(--muted);word-break:break-word}
+.timer{font-size:13px;padding:6px 9px;border-radius:8px;background:var(--bg);white-space:nowrap;flex:none}
+.timer.over{background:var(--warn-bg);color:var(--warn);font-weight:700}
+.prog{font-size:14px;font-weight:600}
+.bar{height:10px;background:var(--line);border-radius:6px;overflow:hidden;margin:6px 0 12px}
+.bar-fill{height:100%;background:var(--accent);width:0;transition:width .3s}
+.bar-fill.done{background:var(--ok)}
+.hint{font-size:13px;color:var(--muted);margin:-4px 0 8px}
+.hint.lock{color:var(--warn)}
+.close-msg{font-size:13px;padding:8px 10px;border-radius:8px;margin:4px 0 10px;background:var(--warn-bg);color:var(--warn)}
+.close-msg.ok{background:var(--ok-bg);color:var(--ok)}
+
+/* progres în tabele */
+.pbar{width:140px;height:8px;background:var(--line);border-radius:4px;overflow:hidden;display:inline-block;vertical-align:middle;margin-right:6px}
+.pbar i{display:block;height:100%;background:var(--accent)}
+.pbar i.done{background:var(--ok)}
+
+/* KPI */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+.kpi b{display:block;font-size:28px;line-height:1.1}
+.kpi span{font-size:13px;color:var(--muted)}
+.kpi.warn b{color:var(--warn)}
+
+/* tabele */
+.tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+table{border-collapse:collapse;width:100%;min-width:960px}
+th,td{padding:10px;border-bottom:1px solid var(--line);text-align:left;font-size:14px;white-space:nowrap;vertical-align:middle}
+th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;position:sticky;top:0;background:var(--card)}
+tr.rowpo{cursor:pointer}
+tr.rowpo:hover{background:var(--accent-soft)}
+tr.rowpo.open{background:var(--accent-soft)}
+tr.gallery-row td{white-space:normal;background:var(--bg)}
+.status{padding:4px 9px;border-radius:999px;font-size:12px;font-weight:700;display:inline-block}
+.status.run{background:var(--accent-soft);color:var(--accent)}
+.status.warn{background:var(--warn-bg);color:var(--warn)}
+.status.done{background:var(--ok-bg);color:var(--ok)}
+.empty{padding:20px;text-align:center;color:var(--muted)}
+
+/* galerii, istoric */
+.thumb{width:64px;height:64px;object-fit:cover;border-radius:8px;cursor:pointer;background:var(--line);flex:none}
+.thumb.ph{display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted)}
+.gallery{display:flex;flex-wrap:wrap;gap:8px}
+.gallery figure{margin:0;width:100px;font-size:11px;color:var(--muted);text-align:center;white-space:normal}
+.gallery figure img{width:100px;height:100px;object-fit:cover;border-radius:8px;cursor:pointer;background:var(--line)}
+.hist{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:8px}
+.hist li{display:flex;gap:10px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 10px}
+.hist .info{flex:1;min-width:0;font-size:14px}
+.hist .info b{display:block}
+.hist .info small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* lightbox */
+#lightbox{position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:300;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom))}
+#lightbox img{max-width:100%;max-height:82vh;object-fit:contain;border-radius:6px}
+#lightbox .cap{color:#ddd;font-size:14px;margin-top:10px;text-align:center}
+#lightbox .lb-close{position:absolute;top:calc(12px + env(safe-area-inset-top));right:12px;width:48px;height:48px;border-radius:50%;border:0;background:rgba(255,255,255,.2);color:#fff;font-size:26px}
+
+/* login */
+.login{max-width:400px;margin:30px auto}
+.login h2{margin-top:0}
+
+/* utilizatori */
+.userlist{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:8px}
+.userlist li{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.userlist li .uname{flex:1;min-width:120px;font-weight:600}
+.userlist li.inactive .uname{color:var(--muted);text-decoration:line-through}
+.userlist select{width:auto;min-height:40px}
+.pill{font-size:12px;padding:3px 8px;border-radius:999px;background:var(--bg);border:1px solid var(--line)}
+</style>
+</head>
+<body>
+
+<div id="msgbar" class="msgbar hidden"></div>
+
+<header class="topbar" id="topbar">
+  <h1>Copacking</h1>
+  <span class="who" id="who"></span>
+  <button type="button" id="btnLogout" class="hidden">Ieșire</button>
+</header>
+<nav class="tabs hidden" id="tabs"></nav>
+
+<main>
+
+<!-- ===================== LOGIN ===================== -->
+<section id="screen-login" class="hidden">
+  <div class="card login">
+    <h2>Autentificare</h2>
+    <form id="loginForm" autocomplete="off">
+      <label class="field">Nume
+        <input id="loginName" type="text" autocapitalize="none" autocomplete="username" required placeholder="ex. ion.popescu">
+      </label>
+      <label class="field">PIN (6 cifre)
+        <input id="loginPin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password" required placeholder="••••••">
+      </label>
+      <button class="btn primary block" type="submit" id="loginBtn">Intră</button>
+    </form>
+    <p class="muted" style="font-size:13px">Contul trebuie creat în prealabil de un administrator. PIN uitat → administratorul recreează contul.</p>
+  </div>
+</section>
+
+<!-- ===================== OPERATOR ===================== -->
+<section id="screen-operator" class="hidden">
+  <div class="card">
+    <div class="row3">
+      <label class="field">Operator
+        <input id="opName" type="text" readonly>
+      </label>
+      <label class="field">Tură
+        <select id="shift"><option value="Tura 1">Tura 1</option><option value="Tura 2">Tura 2</option></select>
+      </label>
+      <label class="field">Interval poze (min)
+        <input id="interval" type="number" min="1" max="600" inputmode="numeric" value="30">
+      </label>
+    </div>
+  </div>
+
+  <h2>PO nou</h2>
+  <form class="card" id="newPoForm" autocomplete="off">
+    <div class="row2">
+      <label class="field">Număr PO *
+        <input id="npPo" type="text" required placeholder="ex. PO-4512">
+      </label>
+      <label class="field">Articol finit *
+        <input id="npArt" type="text" required placeholder="cod / denumire">
+      </label>
+    </div>
+    <div class="row2">
+      <label class="field">Cantitate totală (buc) *
+        <input id="npQty" type="number" min="1" inputmode="numeric" required>
+      </label>
+      <label class="field">% de verificat *
+        <input id="npPct" type="number" min="0.1" max="100" step="0.1" inputmode="decimal" value="5" required>
+      </label>
+    </div>
+    <div class="hint" id="npHint">Țintă: –</div>
+    <button class="btn primary block" type="submit">Pornește PO</button>
+  </form>
+
+  <h2>PO-uri active <small id="activeCount"></small></h2>
+  <div class="grid" id="cards"></div>
+  <div class="empty hidden" id="cardsEmpty">Niciun PO activ. Pornește unul din formularul de mai sus.</div>
+
+  <h2>Istoric verificări</h2>
+  <div class="toolbar">
+    <button class="btn small" type="button" id="btnCsvLogs">⬇ Export CSV</button>
+    <small id="histInfo"></small>
+  </div>
+  <ul class="hist" id="history"></ul>
+</section>
+
+<!-- ===================== SUPERVIZOR ===================== -->
+<section id="screen-supervizor" class="hidden">
+  <div class="kpis" id="kpis"></div>
+  <div class="toolbar">
+    <div class="filters" id="supFilters">
+      <button type="button" data-f="all" class="active">Toate</button>
+      <button type="button" data-f="active">Active</button>
+      <button type="button" data-f="closed">Închise</button>
+    </div>
+    <small id="supInfo"></small>
+  </div>
+  <div class="tablewrap">
+    <table id="supTable">
+      <thead><tr>
+        <th>PO</th><th>Articol</th><th>Tură / operatori</th><th>Start</th><th>Progres</th><th>Poze</th><th>Ultima activitate</th><th>Stare</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===================== ARHIVĂ ===================== -->
+<section id="screen-arhiva" class="hidden">
+  <div class="toolbar">
+    <input id="arqSearch" type="search" placeholder="Caută PO / articol / operator">
+    <input id="arqFrom" type="date" title="De la">
+    <input id="arqTo" type="date" title="Până la">
+    <button class="btn small" type="button" id="btnCsvArchive">⬇ Export CSV</button>
+    <button class="btn small" type="button" id="btnImportArchive">⟳ Importă PO-urile închise din jurnal</button>
+  </div>
+  <small id="arqInfo"></small>
+  <div class="tablewrap" style="margin-top:8px">
+    <table id="arqTable">
+      <thead><tr>
+        <th>PO</th><th>Articol</th><th>Tură / operatori</th><th>Start</th><th>Închis</th><th>Durată</th><th>Verificat</th><th>Poze</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===================== UTILIZATORI (admin) ===================== -->
+<section id="screen-utilizatori" class="hidden">
+  <h2>Utilizator nou</h2>
+  <form class="card" id="userForm" autocomplete="off">
+    <div class="row3">
+      <label class="field">Nume
+        <input id="uName" type="text" required placeholder="ex. Ion Popescu">
+      </label>
+      <label class="field">PIN (minim 6 cifre)
+        <input id="uPin" type="text" inputmode="numeric" pattern="[0-9]{6,}" minlength="6" required>
+      </label>
+      <label class="field">Rol
+        <select id="uRole">
+          <option value="operator">Operator</option>
+          <option value="supervisor">Supervizor</option>
+          <option value="admin">Administrator</option>
+        </select>
+      </label>
+    </div>
+    <div class="hint" id="uHint">Autentificare: <b>–</b></div>
+    <button class="btn primary block" type="submit" id="uBtn">Creează utilizator</button>
+  </form>
+  <h2>Utilizatori</h2>
+  <ul class="userlist" id="userList"></ul>
+</section>
+
+</main>
+
+<div id="lightbox" class="hidden">
+  <button type="button" class="lb-close" id="lbClose" aria-label="Închide">×</button>
+  <img id="lbImg" alt="">
+  <div class="cap" id="lbCap"></div>
+</div>
+
+<input type="file" id="camera" accept="image/*" capture="environment" hidden>
+
+<script type="module">
+import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword, setPersistence, inMemoryPersistence } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, addDoc, setDoc, updateDoc, getDoc, getDocs, onSnapshot, query, where, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+/* ------------------------------------------------------------------ */
+/* Inițializare                                                        */
+/* ------------------------------------------------------------------ */
+const CFG = window.COPACKING_CONFIG;
+const DOMAIN = CFG.emailDomain || "copacking.app";
+const LOG_WINDOW_MS = (CFG.logWindowDays || 60) * 86400000;
+const MIN_PHOTO_PIECES = 6;                 // primele N piese necesită poză
+
+const app = initializeApp(CFG.firebase);
+const auth = getAuth(app);
+let db;
+try {
+  db = initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
+} catch (e) {
+  console.warn("Cache-ul persistent nu e disponibil, se folosește cache în memorie.", e);
+  db = getFirestore(app);
+}
+
+const state = {
+  user: null, profile: null,
+  logs: [], pos: [], archive: [], users: [],
+  view: "operator", supFilter: "all",
+  expanded: new Set(), arqExpanded: new Set(),
+  pendingSid: null, unsub: {}, photoCache: new Map()
+};
+
+/* ------------------------------------------------------------------ */
+/* Utilitare                                                           */
+/* ------------------------------------------------------------------ */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+function el(tag, attrs = {}, ...children) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") n.className = v;
+    else if (k === "dataset") Object.assign(n.dataset, v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined) n.setAttribute(k, v);
+  }
+  for (const c of children.flat()) if (c !== null && c !== undefined) n.append(c.nodeType ? c : document.createTextNode(String(c)));
+  return n;
+}
+const pad = n => String(n).padStart(2, "0");
+function fmtTime(ts) { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function fmtDT(ts) { if (!ts) return "–"; const d = new Date(ts); return `${pad(d.getDate())}.${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function fmtDTfull(ts) { if (!ts) return ""; const d = new Date(ts); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }
+function fmtDur(ms) {
+  if (ms == null || ms < 0) return "–";
+  const m = Math.floor(ms / 60000), h = Math.floor(m / 60), d = Math.floor(h / 24);
+  if (d > 0) return `${d}z ${h % 24}h`;
+  if (h > 0) return `${h}h ${m % 60}m`;
+  return `${m} min`;
+}
+function fmtAgo(ms) { const m = Math.floor(ms / 60000); if (m < 1) return "chiar acum"; return "acum " + fmtDur(ms); }
+function minutes(ms) { return Math.floor(ms / 60000); }
+function calcTarget(qty, pct) {
+  qty = Number(qty) || 0; pct = Number(pct) || 0;
+  if (qty <= 0) return 0;
+  return Math.min(qty, Math.max(MIN_PHOTO_PIECES, Math.ceil(qty * pct / 100)));
+}
+function nameToLogin(name) {
+  return String(name || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, ".").replace(/^\.+|\.+$/g, "");
+}
+const canSup = () => !!state.profile && (state.profile.role === "supervisor" || state.profile.role === "admin");
+const isAdmin = () => !!state.profile && state.profile.role === "admin";
+function getShift() { return $("#shift").value; }
+function getInterval() { const v = Number(localStorage.getItem("cp_interval")) || 30; return v > 0 ? v : 30; }
+
+/* bara de mesaje */
+const msgbar = $("#msgbar");
+let msgTimer = null;
+function showMsg(text, type = "error") {
+  msgbar.textContent = "";
+  const btn = el("button", { class: "msg-close", type: "button", "aria-label": "Închide" }, "×");
+  btn.addEventListener("click", hideMsg);
+  msgbar.append(el("span", {}, text), btn);
+  msgbar.className = "msgbar " + type;
+  clearTimeout(msgTimer);
+  if (type !== "error") msgTimer = setTimeout(hideMsg, 4000);
+}
+function hideMsg() { msgbar.className = "msgbar hidden"; }
+function errText(e) {
+  const c = (e && e.code) || "";
+  if (/invalid-credential|wrong-password|user-not-found|invalid-login/.test(c)) return "Nume sau PIN greșit.";
+  if (/too-many-requests/.test(c)) return "Prea multe încercări. Așteaptă câteva minute.";
+  if (/network-request-failed/.test(c)) return "Fără conexiune la internet.";
+  if (/email-already-in-use/.test(c)) return "Există deja un utilizator cu acest nume.";
+  if (/weak-password/.test(c)) return "PIN-ul trebuie să aibă minim 6 cifre.";
+  if (/permission-denied/.test(c)) return "Nu ai permisiunea pentru această acțiune.";
+  if (/unavailable/.test(c)) return "Serviciul nu e disponibil momentan (offline?). Datele se trimit când revine conexiunea.";
+  return (e && e.message) || String(e);
+}
+function csvDownload(filename, rows) {
+  const esc = v => { const s = v == null ? "" : String(v); return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const txt = "\uFEFF" + rows.map(r => r.map(esc).join(";")).join("\r\n");
+  const blob = new Blob([txt], { type: "text/csv;charset=utf-8" });
+  const a = el("a", { href: URL.createObjectURL(blob), download: filename });
+  document.body.append(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+
+/* ------------------------------------------------------------------ */
+/* Lightbox                                                            */
+/* ------------------------------------------------------------------ */
+const lb = $("#lightbox"), lbImg = $("#lbImg"), lbCap = $("#lbCap");
+async function openLightbox(asset, thumb, caption) {
+  lbImg.src = thumb || "";
+  lbCap.textContent = (caption || "") + (asset ? " · se încarcă poza completă…" : "");
+  lb.classList.remove("hidden");
+  if (!asset) { lbCap.textContent = caption || ""; return; }
+  try {
+    let data = state.photoCache.get(asset);
+    if (!data) {
+      const snap = await getDoc(doc(db, "photos", asset));
+      if (!snap.exists()) throw new Error("Poza nu mai există.");
+      data = snap.data().data;
+      state.photoCache.set(asset, data);
+      if (state.photoCache.size > 12) state.photoCache.delete(state.photoCache.keys().next().value);
+    }
+    if (!lb.classList.contains("hidden")) { lbImg.src = data; lbCap.textContent = caption || ""; }
+  } catch (e) {
+    lbCap.textContent = (caption || "") + " · " + errText(e);
+  }
+}
+function closeLightbox() { lb.classList.add("hidden"); lbImg.src = ""; }
+$("#lbClose").addEventListener("click", closeLightbox);
+lb.addEventListener("click", e => { if (e.target === lb || e.target === lbImg) closeLightbox(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeLightbox(); });
+
+/* ------------------------------------------------------------------ */
+/* Navigare                                                            */
+/* ------------------------------------------------------------------ */
+const VIEWS = {
+  operator:    { label: "Operator",    allowed: () => true },
+  supervizor:  { label: "Supervizor",  allowed: canSup },
+  arhiva:      { label: "Arhivă",      allowed: canSup },
+  utilizatori: { label: "Utilizatori", allowed: isAdmin }
+};
+function viewFromHash() {
+  const h = location.hash.replace("#", "").toLowerCase();
+  return VIEWS[h] ? h : "operator";
+}
+function renderTabs() {
+  const tabs = $("#tabs");
+  tabs.textContent = "";
+  const visible = Object.entries(VIEWS).filter(([, v]) => v.allowed());
+  if (visible.length <= 1) { tabs.classList.add("hidden"); return; }
+  tabs.classList.remove("hidden");
+  for (const [k, v] of visible) {
+    tabs.append(el("button", { type: "button", class: k === state.view ? "active" : "", onclick: () => setView(k) }, v.label));
+  }
+}
+function setView(v) {
+  if (!VIEWS[v] || !VIEWS[v].allowed()) v = "operator";
+  state.view = v;
+  if (location.hash.replace("#", "") !== v) history.replaceState(null, "", "#" + v);
+  for (const k of Object.keys(VIEWS)) $("#screen-" + k).classList.toggle("hidden", k !== v);
+  $("#screen-login").classList.add("hidden");
+  renderTabs();
+  if (v === "operator") renderOperator();
+  if (v === "supervizor") renderSupervisor();
+  if (v === "arhiva") { subscribeArchive(); renderArchive(); }
+  if (v === "utilizatori") { subscribeUsers(); renderUsers(); }
+}
+window.addEventListener("hashchange", () => { if (state.profile) setView(viewFromHash()); });
+
+/* ------------------------------------------------------------------ */
+/* Autentificare                                                       */
+/* ------------------------------------------------------------------ */
+$("#loginName").value = localStorage.getItem("cp_name") || "";
+$("#loginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const name = $("#loginName").value.trim(), pin = $("#loginPin").value.trim();
+  const login = nameToLogin(name);
+  if (!login) return showMsg("Introdu numele.");
+  if (!/^\d{6,}$/.test(pin)) return showMsg("PIN-ul are minim 6 cifre.");
+  const btn = $("#loginBtn"); btn.disabled = true; btn.textContent = "Se verifică…";
+  try {
+    await signInWithEmailAndPassword(auth, `${login}@${DOMAIN}`, pin);
+    localStorage.setItem("cp_name", name);
+    $("#loginPin").value = "";
+  } catch (err) {
+    showMsg(errText(err));
+  } finally { btn.disabled = false; btn.textContent = "Intră"; }
+});
+$("#btnLogout").addEventListener("click", () => signOut(auth));
+
+function unsubAll() { for (const k of Object.keys(state.unsub)) { try { state.unsub[k](); } catch (_) {} } state.unsub = {}; }
+function showLogin() {
+  for (const k of Object.keys(VIEWS)) $("#screen-" + k).classList.add("hidden");
+  $("#screen-login").classList.remove("hidden");
+  $("#tabs").classList.add("hidden");
+  $("#btnLogout").classList.add("hidden");
+  $("#who").textContent = "";
+  $("#cards").textContent = ""; $("#history").textContent = "";
+}
+
+onAuthStateChanged(auth, user => {
+  unsubAll();
+  state.user = user; state.profile = null;
+  state.logs = []; state.pos = []; state.archive = []; state.users = [];
+  if (!user) { showLogin(); return; }
+  state.unsub.profile = onSnapshot(doc(db, "users", user.uid), snap => {
+    const d = snap.exists() ? snap.data() : null;
+    if (!d || d.active !== true) {
+      showMsg("Contul nu este autorizat sau a fost dezactivat. Contactează un administrator.");
+      signOut(auth);
+      return;
+    }
+    const first = !state.profile;
+    state.profile = { uid: user.uid, ...d };
+    $("#who").textContent = `${d.name} · ${{ operator: "operator", supervisor: "supervizor", admin: "admin" }[d.role] || d.role}`;
+    $("#opName").value = d.name;
+    if (first) enterApp(); else { renderTabs(); if (!VIEWS[state.view].allowed()) setView("operator"); }
+  }, err => { showMsg("Nu s-a putut citi profilul: " + errText(err)); signOut(auth); });
+});
+
+function enterApp() {
+  $("#btnLogout").classList.remove("hidden");
+  subscribeLogs();
+  setView(viewFromHash());
+}
+
+/* ------------------------------------------------------------------ */
+/* Jurnal (logs) → PO-uri                                              */
+/* ------------------------------------------------------------------ */
+function subscribeLogs() {
+  const cutoff = Date.now() - LOG_WINDOW_MS;
+  const q = query(collection(db, "logs"), where("ts", ">=", cutoff), orderBy("ts"));
+  state.unsub.logs = onSnapshot(q, { includeMetadataChanges: false }, snap => {
+    state.logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    state.pos = buildPOs(state.logs);
+    if (state.view === "operator") renderOperator();
+    if (state.view === "supervizor") renderSupervisor();
+  }, err => showMsg("Eroare la citirea jurnalului: " + errText(err)));
+}
+function buildPOs(logs) {
+  const map = new Map();
+  for (const l of logs) if (l.type === "start") {
+    map.set(l.id, { sid: l.id, po: l.po, art: l.art || "", qty: Number(l.qty) || 0, pct: Number(l.pct) || 0, shift: l.shift || "", ops: new Set(l.op ? [l.op] : []),
+      start: l.ts, last: l.ts, lastPhoto: l.ts, verified: 0, photos: [], checks: [], end: null, endBy: "", uid: l.uid });
+  }
+  for (const l of logs) {
+    if (l.type === "start") continue;
+    const p = map.get(l.sid); if (!p) continue;
+    p.last = Math.max(p.last, l.ts); if (l.op) p.ops.add(l.op);
+    if (l.type === "photo") { p.photos.push(l); p.verified += Number(l.n) || 0; p.lastPhoto = Math.max(p.lastPhoto, l.ts); }
+    else if (l.type === "check") { p.checks.push(l); p.verified += Number(l.n) || 0; }
+    else if (l.type === "end") { p.end = l.ts; p.endBy = l.op || ""; }
+  }
+  for (const p of map.values()) { p.target = calcTarget(p.qty, p.pct); p.photos.sort((a, b) => a.ts - b.ts); }
+  return [...map.values()].sort((a, b) => b.start - a.start);
+}
+function baseEvent(p) {
+  return { ts: Date.now(), shift: getShift(), op: state.profile.name, uid: state.user.uid, po: p.po, sid: p.sid };
+}
+/* scrierile nu blochează interfața: confirmăm imediat (cache local), raportăm doar erorile */
+function fire(promise, okMsg) {
+  if (okMsg) showMsg(okMsg, "info");
+  promise.catch(e => showMsg("Salvarea a eșuat: " + errText(e)));
+}
+
+/* ------------------------------------------------------------------ */
+/* Ecran OPERATOR                                                      */
+/* ------------------------------------------------------------------ */
+$("#shift").value = localStorage.getItem("cp_shift") || "Tura 1";
+$("#interval").value = getInterval();
+$("#shift").addEventListener("change", () => localStorage.setItem("cp_shift", $("#shift").value));
+$("#interval").addEventListener("change", () => {
+  let v = Number($("#interval").value); if (!(v > 0)) v = 30;
+  $("#interval").value = v; localStorage.setItem("cp_interval", v); updateCardsDyn();
+});
+function updateNpHint() {
+  const t = calcTarget($("#npQty").value, $("#npPct").value);
+  $("#npHint").textContent = t ? `Țintă: ${t} piese de verificat (minim ${MIN_PHOTO_PIECES}, primele ${MIN_PHOTO_PIECES} cu poză).` : "Țintă: –";
+}
+$("#npQty").addEventListener("input", updateNpHint); $("#npPct").addEventListener("input", updateNpHint);
+
+$("#newPoForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const po = $("#npPo").value.trim(), art = $("#npArt").value.trim();
+  const qty = Math.floor(Number($("#npQty").value)), pct = Number($("#npPct").value);
+  if (!po || !art) return showMsg("Completează numărul PO și articolul.");
+  if (!(qty > 0)) return showMsg("Cantitatea totală trebuie să fie mai mare decât 0.");
+  if (!(pct > 0 && pct <= 100)) return showMsg("Procentul de verificat trebuie să fie între 0 și 100.");
+  if (state.pos.some(p => !p.end && p.po.toLowerCase() === po.toLowerCase())) return showMsg(`Există deja un PO activ cu numărul ${po}.`);
+  fire(addDoc(collection(db, "logs"), { type: "start", ts: Date.now(), shift: getShift(), op: state.profile.name, uid: state.user.uid, po, art, qty, pct }), `PO ${po} pornit.`);
+  $("#newPoForm").reset(); $("#npPct").value = 5; updateNpHint();
+});
+
+const cardsEl = $("#cards");
+function renderOperator() {
+  const active = state.pos.filter(p => !p.end);
+  $("#activeCount").textContent = active.length ? `(${active.length})` : "";
+  $("#cardsEmpty").classList.toggle("hidden", active.length > 0);
+  const keep = new Set(active.map(p => p.sid));
+  for (const c of $$(".po", cardsEl)) if (!keep.has(c.dataset.sid)) c.remove();
+  for (const p of active) {
+    let card = cardsEl.querySelector(`.po[data-sid="${p.sid}"]`);
+    if (!card) { card = buildCard(p); cardsEl.append(card); }
+    updateCard(card, p);
+  }
+  renderHistory();
+}
+function buildCard(p) {
+  const card = el("div", { class: "card po", dataset: { sid: p.sid } });
+  card.innerHTML = `
+    <div class="po-head">
+      <div><div class="po-num"></div><div class="po-art"></div></div>
+      <div class="timer dyn-timer">–</div>
+    </div>
+    <div class="prog dyn-prog">–</div>
+    <div class="bar"><div class="bar-fill dyn-bar"></div></div>
+    <div class="row2">
+      <label class="field">Cantitate totală<input class="f-qty" type="number" min="1" inputmode="numeric"></label>
+      <label class="field">% de verificat<input class="f-pct" type="number" min="0.1" max="100" step="0.1" inputmode="decimal"></label>
+    </div>
+    <div class="row2">
+      <label class="field">Bucăți verificate acum<input class="f-n" type="number" min="1" inputmode="numeric" value="1"></label>
+      <label class="field">Articol verificat (cod de bare / denumire)<input class="f-code" type="text" placeholder="se completează la scanare"></label>
+    </div>
+    <label class="field">Observații<input class="f-note" type="text"></label>
+    <div class="hint dyn-hint"></div>
+    <div class="actions">
+      <button type="button" class="btn primary b-photo">📷 Fă poză</button>
+      <button type="button" class="btn b-check">Salvează verificare fără poză</button>
+    </div>
+    <div class="close-msg dyn-close"></div>
+    <button type="button" class="btn danger block b-close">Închide PO</button>`;
+  $(".po-num", card).textContent = "PO " + p.po;
+  $(".po-art", card).textContent = p.art;
+  $(".f-qty", card).value = p.qty; $(".f-pct", card).value = p.pct;
+  return card;
+}
+function updateCard(card, p) {
+  const now = Date.now(), interval = getInterval();
+  const since = now - p.lastPhoto, over = since > interval * 60000;
+  const timer = $(".dyn-timer", card);
+  timer.textContent = (p.photos.length ? "Ultima poză: " : "Fără poză · start: ") + fmtAgo(since);
+  timer.classList.toggle("over", over);
+  $(".dyn-prog", card).textContent = `Verificat ${p.verified} / ${p.target} · ${p.qty} buc · ${p.pct}% · 📷 ${p.photos.length}`;
+  const bar = $(".dyn-bar", card);
+  bar.style.width = (p.target ? Math.min(100, p.verified / p.target * 100) : 0) + "%";
+  bar.classList.toggle("done", p.verified >= p.target && p.target > 0);
+  const fq = $(".f-qty", card), fp = $(".f-pct", card);
+  if (document.activeElement !== fq) fq.value = p.qty;
+  if (document.activeElement !== fp) fp.value = p.pct;
+  const lock = p.verified < MIN_PHOTO_PIECES;
+  const fn = $(".f-n", card);
+  fn.disabled = lock; if (lock) fn.value = 1;
+  const hint = $(".dyn-hint", card);
+  hint.textContent = lock ? `Primele ${MIN_PHOTO_PIECES} piese necesită câte o poză fiecare (${p.verified}/${MIN_PHOTO_PIECES}).` : "Poți salva verificări și fără poză; câmpul de bucăți e editabil.";
+  hint.classList.toggle("lock", lock);
+  $(".b-check", card).classList.toggle("hidden", lock);
+  const cm = $(".dyn-close", card), done = p.verified >= p.target;
+  cm.textContent = done ? "Țintă atinsă – PO-ul poate fi închis." : `Închiderea e blocată: mai sunt necesare ${p.target - p.verified} piese verificate (țintă ${p.target}).`;
+  cm.classList.toggle("ok", done);
+  const bc = $(".b-close", card);
+  bc.disabled = !done;
+  if (!done && bc.dataset.armed === "1") disarm(bc);
+}
+function updateCardsDyn() {
+  for (const p of state.pos) {
+    if (p.end) continue;
+    const card = cardsEl.querySelector(`.po[data-sid="${p.sid}"]`);
+    if (card) updateCard(card, p);
+  }
+}
+function poOf(card) { return state.pos.find(x => x.sid === card.dataset.sid); }
+
+cardsEl.addEventListener("click", e => {
+  const btn = e.target.closest("button"); if (!btn) return;
+  const card = btn.closest(".po"); const p = card && poOf(card); if (!p) return;
+  if (btn.classList.contains("b-photo")) startPhoto(p, card, btn);
+  else if (btn.classList.contains("b-check")) saveCheck(p, card);
+  else if (btn.classList.contains("b-close")) closePO(p, btn);
+});
+cardsEl.addEventListener("change", e => {
+  const inp = e.target; if (!inp.matches(".f-qty,.f-pct")) return;
+  const card = inp.closest(".po"); const p = poOf(card); if (!p) return;
+  const qty = Math.floor(Number($(".f-qty", card).value)), pct = Number($(".f-pct", card).value);
+  if (!(qty > 0)) { showMsg("Cantitatea trebuie să fie mai mare decât 0."); $(".f-qty", card).value = p.qty; return; }
+  if (!(pct > 0 && pct <= 100)) { showMsg("Procentul trebuie să fie între 0 și 100."); $(".f-pct", card).value = p.pct; return; }
+  if (qty < p.verified) { showMsg(`Cantitatea nu poate fi mai mică decât piesele deja verificate (${p.verified}).`); $(".f-qty", card).value = p.qty; return; }
+  fire(updateDoc(doc(db, "logs", p.sid), { qty, pct }), `PO ${p.po}: cantitate ${qty}, ${pct}% → țintă ${calcTarget(qty, pct)}.`);
+});
+
+function readCheckFields(p, card) {
+  const lock = p.verified < MIN_PHOTO_PIECES;
+  let n = lock ? 1 : Math.floor(Number($(".f-n", card).value));
+  if (!(n >= 1)) { showMsg("Numărul de bucăți verificate trebuie să fie cel puțin 1."); return null; }
+  if (p.verified + n > p.qty) { showMsg(`Depășești cantitatea totală: ${p.verified} verificate + ${n} > ${p.qty}.`); return null; }
+  return { n, code: $(".f-code", card).value.trim(), note: $(".f-note", card).value.trim() };
+}
+function clearCheckFields(card) { $(".f-n", card).value = 1; $(".f-code", card).value = ""; $(".f-note", card).value = ""; }
+
+function saveCheck(p, card) {
+  if (p.verified < MIN_PHOTO_PIECES) return showMsg(`Primele ${MIN_PHOTO_PIECES} piese se salvează doar cu poză.`);
+  const f = readCheckFields(p, card); if (!f) return;
+  fire(addDoc(collection(db, "logs"), { type: "check", ...baseEvent(p), n: f.n, code: f.code, note: f.note }), `PO ${p.po}: +${f.n} verificate (fără poză).`);
+  clearCheckFields(card);
+}
+
+/* poze */
+const cameraInput = $("#camera");
+function startPhoto(p, card, btn) {
+  const f = readCheckFields(p, card); if (!f) return;
+  state.pendingSid = p.sid;
+  cameraInput.value = "";
+  cameraInput.click();
+}
+cameraInput.addEventListener("change", async () => {
+  const file = cameraInput.files && cameraInput.files[0];
+  const sid = state.pendingSid; state.pendingSid = null;
+  if (!file || !sid) return;
+  const card = cardsEl.querySelector(`.po[data-sid="${sid}"]`); const p = state.pos.find(x => x.sid === sid);
+  if (!card || !p) return showMsg("PO-ul nu mai este activ.");
+  const btn = $(".b-photo", card); btn.disabled = true; btn.textContent = "Se procesează…";
+  try {
+    const img = await processImage(file);
+    const f = readCheckFields(p, card); if (!f) return;
+    if (!f.code && img.code) { f.code = img.code; $(".f-code", card).value = img.code; }
+    const pref = doc(collection(db, "photos"));
+    const ts = Date.now();
+    fire(setDoc(pref, { data: img.full, ts, uid: state.user.uid, po: p.po, sid: p.sid }));
+    fire(addDoc(collection(db, "logs"), { type: "photo", ...baseEvent(p), ts, n: f.n, code: f.code, note: f.note, asset: pref.id, url: img.thumb }),
+      `PO ${p.po}: poză salvată, +${f.n} verificate` + (img.code ? ` · cod ${img.code}` : "") + ".");
+    state.photoCache.set(pref.id, img.full);
+    clearCheckFields(card);
+  } catch (e) {
+    showMsg("Poza nu a putut fi procesată: " + errText(e));
+  } finally { btn.disabled = false; btn.textContent = "📷 Fă poză"; }
+});
+async function loadBitmap(file) {
+  try { return await createImageBitmap(file, { imageOrientation: "from-image" }); }
+  catch (_) {
+    return await new Promise((res, rej) => {
+      const im = new Image(); const u = URL.createObjectURL(file);
+      im.onload = () => { res(im); setTimeout(() => URL.revokeObjectURL(u), 0); };
+      im.onerror = () => rej(new Error("Imagine invalidă"));
+      im.src = u;
+    });
+  }
+}
+async function processImage(file) {
+  const bmp = await loadBitmap(file);
+  const w = bmp.width, h = bmp.height;
+  const maxSide = CFG.photoMaxSide || 1100;
+  const s = Math.min(1, maxSide / Math.max(w, h));
+  const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(w * s)); c.height = Math.max(1, Math.round(h * s));
+  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+  let q = CFG.photoQuality || 0.7, full = c.toDataURL("image/jpeg", q);
+  while (full.length > 900000 && q > 0.3) { q -= 0.1; full = c.toDataURL("image/jpeg", q); }   // sub limita de 1 MB/document Firestore
+  const ts = Math.min(1, 128 / Math.max(c.width, c.height));
+  const t = document.createElement("canvas"); t.width = Math.max(1, Math.round(c.width * ts)); t.height = Math.max(1, Math.round(c.height * ts));
+  t.getContext("2d").drawImage(c, 0, 0, t.width, t.height);
+  const thumb = t.toDataURL("image/jpeg", 0.6);
+  let code = "";
+  if ("BarcodeDetector" in window) {
+    try { const det = new window.BarcodeDetector(); const r = await det.detect(c); if (r && r.length) code = r[0].rawValue || ""; } catch (_) { /* detector indisponibil */ }
+  }
+  if (bmp.close) bmp.close();
+  return { full, thumb, code };
+}
+
+/* închidere PO (confirmare prin două apăsări) */
+function disarm(btn) { btn.dataset.armed = ""; btn.classList.remove("armed"); btn.textContent = "Închide PO"; clearTimeout(btn._t); }
+function closePO(p, btn) {
+  if (p.verified < p.target) return showMsg(`Nu poți închide PO ${p.po}: ${p.verified}/${p.target} piese verificate.`);
+  if (btn.dataset.armed === "1") { disarm(btn); doClose(p); return; }
+  btn.dataset.armed = "1"; btn.classList.add("armed"); btn.textContent = "Apasă din nou pentru a confirma închiderea";
+  clearTimeout(btn._t); btn._t = setTimeout(() => disarm(btn), 5000);
+}
+function archiveFromPO(p, endTs, endBy) {
+  const photos = p.photos.slice(0, 150).map(x => ({ id: x.asset || "", url: x.url || "", ts: x.ts, code: x.code || "", n: Number(x.n) || 0, op: x.op || "" }));
+  return { po: p.po, article: p.art, shift: p.shift, operators: [...p.ops], qty: p.qty, pct: p.pct, start: p.start, end: endTs,
+    verified: p.verified, target: p.target, photos, count: p.photos.length, checks: p.checks.length, closedBy: endBy, sid: p.sid };
+}
+function doClose(p) {
+  const endTs = Date.now();
+  fire(addDoc(collection(db, "logs"), { type: "end", ...baseEvent(p), ts: endTs }), `PO ${p.po} închis.`);
+  fire(setDoc(doc(db, "archive", p.sid), archiveFromPO(p, endTs, state.profile.name)));
+}
+
+/* istoric */
+function renderHistory() {
+  const ul = $("#history"); ul.textContent = "";
+  const evs = state.logs.filter(l => l.type === "photo" || l.type === "check").sort((a, b) => b.ts - a.ts).slice(0, 60);
+  $("#histInfo").textContent = evs.length ? `ultimele ${evs.length} verificări` : "nicio verificare încă";
+  for (const l of evs) {
+    const li = el("li");
+    if (l.type === "photo") {
+      const img = el("img", { class: "thumb", src: l.url || "", alt: "poză", loading: "lazy" });
+      img.addEventListener("click", () => openLightbox(l.asset, l.url, `PO ${l.po} · ${fmtDT(l.ts)} · ${l.op || ""}${l.code ? " · " + l.code : ""}`));
+      li.append(img);
+    } else li.append(el("div", { class: "thumb ph" }, "fără poză"));
+    li.append(el("div", { class: "info" },
+      el("b", {}, `PO ${l.po} · +${l.n || 0} buc`),
+      el("small", {}, `${fmtDT(l.ts)} · ${l.op || ""} · ${l.shift || ""}${l.code ? " · " + l.code : ""}${l.note ? " · " + l.note : ""}`)));
+    ul.append(li);
+  }
+}
+$("#btnCsvLogs").addEventListener("click", () => {
+  const rows = [["Tip", "Data/ora", "Tura", "Operator", "PO", "Articol", "ID start", "Bucati", "Cod verificat", "Observatii", "Cantitate", "Procent", "ID poza"]];
+  const arts = new Map(state.pos.map(p => [p.sid, p.art]));
+  for (const l of [...state.logs].sort((a, b) => a.ts - b.ts)) {
+    rows.push([l.type, fmtDTfull(l.ts), l.shift || "", l.op || "", l.po || "", l.art || arts.get(l.sid) || "", l.type === "start" ? l.id : (l.sid || ""),
+      l.n ?? "", l.code || "", l.note || "", l.qty ?? "", l.pct ?? "", l.asset || ""]);
+  }
+  csvDownload(`copacking_jurnal_${new Date().toISOString().slice(0, 10)}.csv`, rows);
+});
+
+/* ------------------------------------------------------------------ */
+/* Ecran SUPERVIZOR                                                    */
+/* ------------------------------------------------------------------ */
+$("#supFilters").addEventListener("click", e => {
+  const b = e.target.closest("button[data-f]"); if (!b) return;
+  state.supFilter = b.dataset.f;
+  $$("#supFilters button").forEach(x => x.classList.toggle("active", x === b));
+  renderSupervisor();
+});
+function galleryFor(photos, poLabel) {
+  const g = el("div", { class: "gallery" });
+  if (!photos.length) g.append(el("span", { class: "muted" }, "Nicio poză."));
+  for (const x of photos) {
+    const img = el("img", { src: x.url || "", alt: "poză", loading: "lazy" });
+    img.addEventListener("click", ev => { ev.stopPropagation(); openLightbox(x.asset || x.id, x.url, `${poLabel} · ${fmtDT(x.ts)} · ${x.op || ""}${x.code ? " · " + x.code : ""}`); });
+    g.append(el("figure", {}, img, el("figcaption", {}, `${fmtTime(x.ts)} · +${x.n || 0}${x.code ? " · " + x.code : ""}`)));
+  }
+  return g;
+}
+function progressCell(verified, target, qty, pct) {
+  const pc = target ? Math.min(100, verified / target * 100) : 0;
+  const bar = el("span", { class: "pbar" }, el("i", { class: verified >= target && target > 0 ? "done" : "", style: `width:${pc}%` }));
+  return el("td", {}, bar, `${verified}/${target} · ${qty} buc · ${pct}%`);
+}
+function renderSupervisor() {
+  const now = Date.now(), interval = getInterval() * 60000;
+  const all = state.pos;
+  const active = all.filter(p => !p.end), closed = all.filter(p => p.end);
+  const idle = active.filter(p => now - p.last > interval);
+  const totalVer = all.reduce((s, p) => s + p.verified, 0);
+  const k = $("#kpis"); k.textContent = "";
+  k.append(
+    el("div", { class: "kpi" }, el("b", {}, active.length), el("span", {}, "PO-uri active")),
+    el("div", { class: "kpi" }, el("b", {}, closed.length), el("span", {}, `PO-uri închise (${CFG.logWindowDays || 60} zile)`)),
+    el("div", { class: "kpi" + (idle.length ? " warn" : "") }, el("b", {}, idle.length), el("span", {}, `fără activitate > ${getInterval()} min`)),
+    el("div", { class: "kpi" }, el("b", {}, totalVer), el("span", {}, "piese verificate total")));
+  const list = state.supFilter === "active" ? active : state.supFilter === "closed" ? closed : all;
+  $("#supInfo").textContent = `${list.length} PO-uri · actualizat ${fmtTime(now)}`;
+  const tb = $("#supTable tbody"); tb.textContent = "";
+  if (!list.length) { tb.append(el("tr", {}, el("td", { colspan: 8, class: "empty" }, "Nimic de afișat."))); return; }
+  for (const p of list) {
+    let status;
+    if (p.end) status = el("span", { class: "status done" }, `Închis · ${fmtDur(p.end - p.start)}`);
+    else if (now - p.last > interval) status = el("span", { class: "status warn" }, `⚠ Fără activitate de ${minutes(now - p.last)} min`);
+    else status = el("span", { class: "status run" }, "În lucru");
+    const tr = el("tr", { class: "rowpo" + (state.expanded.has(p.sid) ? " open" : ""), dataset: { sid: p.sid } },
+      el("td", {}, el("b", {}, p.po)), el("td", {}, p.art), el("td", {}, `${p.shift} · ${[...p.ops].join(", ")}`), el("td", {}, fmtDT(p.start)),
+      progressCell(p.verified, p.target, p.qty, p.pct), el("td", {}, p.photos.length), el("td", {}, fmtDT(p.last)), el("td", {}, status));
+    tr.addEventListener("click", () => { state.expanded.has(p.sid) ? state.expanded.delete(p.sid) : state.expanded.add(p.sid); renderSupervisor(); });
+    tb.append(tr);
+    if (state.expanded.has(p.sid)) tb.append(el("tr", { class: "gallery-row" }, el("td", { colspan: 8 }, galleryFor(p.photos, "PO " + p.po))));
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Ecran ARHIVĂ                                                        */
+/* ------------------------------------------------------------------ */
+function subscribeArchive() {
+  if (state.unsub.archive) return;
+  const q = query(collection(db, "archive"), orderBy("end", "desc"), limit(1000));
+  state.unsub.archive = onSnapshot(q, snap => {
+    state.archive = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (state.view === "arhiva") renderArchive();
+  }, err => showMsg("Eroare la citirea arhivei: " + errText(err)));
+}
+["#arqSearch", "#arqFrom", "#arqTo"].forEach(s => $(s).addEventListener("input", renderArchive));
+function archiveFiltered() {
+  const s = $("#arqSearch").value.trim().toLowerCase();
+  const from = $("#arqFrom").value ? new Date($("#arqFrom").value + "T00:00:00").getTime() : null;
+  const to = $("#arqTo").value ? new Date($("#arqTo").value + "T23:59:59.999").getTime() : null;
+  return state.archive.filter(a => {
+    if (from && a.end < from) return false;
+    if (to && a.end > to) return false;
+    if (!s) return true;
+    return [a.po, a.article, ...(a.operators || [])].some(v => String(v || "").toLowerCase().includes(s));
+  });
+}
+function renderArchive() {
+  if (state.view !== "arhiva") return;
+  const list = archiveFiltered();
+  $("#arqInfo").textContent = `${list.length} din ${state.archive.length} PO-uri arhivate`;
+  const tb = $("#arqTable tbody"); tb.textContent = "";
+  if (!list.length) { tb.append(el("tr", {}, el("td", { colspan: 8, class: "empty" }, "Nimic de afișat."))); return; }
+  for (const a of list) {
+    const tr = el("tr", { class: "rowpo" + (state.arqExpanded.has(a.id) ? " open" : "") },
+      el("td", {}, el("b", {}, a.po)), el("td", {}, a.article || ""), el("td", {}, `${a.shift || ""} · ${(a.operators || []).join(", ")}`),
+      el("td", {}, fmtDT(a.start)), el("td", {}, fmtDT(a.end)), el("td", {}, fmtDur(a.end - a.start)),
+      el("td", {}, `${a.verified}/${a.target} · ${a.qty} buc · ${a.pct}%`), el("td", {}, a.count ?? (a.photos || []).length));
+    tr.addEventListener("click", () => { state.arqExpanded.has(a.id) ? state.arqExpanded.delete(a.id) : state.arqExpanded.add(a.id); renderArchive(); });
+    tb.append(tr);
+    if (state.arqExpanded.has(a.id)) tb.append(el("tr", { class: "gallery-row" }, el("td", { colspan: 8 }, galleryFor(a.photos || [], "PO " + a.po))));
+  }
+}
+$("#btnCsvArchive").addEventListener("click", () => {
+  const rows = [["PO", "Articol", "Tura", "Operatori", "Start", "Inchis", "Durata (min)", "Cantitate", "Procent", "Tinta", "Verificat", "Poze", "Verificari fara poza", "Inchis de"]];
+  for (const a of archiveFiltered()) rows.push([a.po, a.article || "", a.shift || "", (a.operators || []).join(", "), fmtDTfull(a.start), fmtDTfull(a.end),
+    minutes((a.end || 0) - (a.start || 0)), a.qty, a.pct, a.target, a.verified, a.count ?? (a.photos || []).length, a.checks ?? "", a.closedBy || ""]);
+  csvDownload(`copacking_arhiva_${new Date().toISOString().slice(0, 10)}.csv`, rows);
+});
+$("#btnImportArchive").addEventListener("click", async () => {
+  const btn = $("#btnImportArchive"); btn.disabled = true; btn.textContent = "Se importă…";
+  let imported = 0, skipped = 0;
+  try {
+    const ends = await getDocs(query(collection(db, "logs"), where("type", "==", "end")));
+    for (const e of ends.docs) {
+      const ev = e.data(); if (!ev.sid) { skipped++; continue; }
+      const ar = await getDoc(doc(db, "archive", ev.sid));
+      if (ar.exists()) { skipped++; continue; }
+      const startSnap = await getDoc(doc(db, "logs", ev.sid));
+      if (!startSnap.exists()) { skipped++; continue; }
+      const evs = await getDocs(query(collection(db, "logs"), where("sid", "==", ev.sid)));
+      const logs = [{ id: startSnap.id, ...startSnap.data() }, ...evs.docs.map(d => ({ id: d.id, ...d.data() }))];
+      const p = buildPOs(logs)[0];
+      if (!p) { skipped++; continue; }
+      await setDoc(doc(db, "archive", ev.sid), archiveFromPO(p, p.end || ev.ts, p.endBy || ev.op || ""));
+      imported++;
+    }
+    showMsg(`Import terminat: ${imported} PO-uri adăugate în arhivă, ${skipped} sărite (deja existente sau incomplete).`, "info");
+  } catch (e) {
+    showMsg("Importul s-a oprit: " + errText(e));
+  } finally { btn.disabled = false; btn.textContent = "⟳ Importă PO-urile închise din jurnal"; }
+});
+
+/* ------------------------------------------------------------------ */
+/* Ecran UTILIZATORI (admin)                                           */
+/* ------------------------------------------------------------------ */
+function subscribeUsers() {
+  if (state.unsub.users) return;
+  state.unsub.users = onSnapshot(query(collection(db, "users"), orderBy("name")), snap => {
+    state.users = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+    if (state.view === "utilizatori") renderUsers();
+  }, err => showMsg("Eroare la citirea utilizatorilor: " + errText(err)));
+}
+$("#uName").addEventListener("input", () => { const l = nameToLogin($("#uName").value); $("#uHint").innerHTML = ""; $("#uHint").append("Autentificare cu numele: ", el("b", {}, l || "–"), ` (cont intern ${l || "…"}@${DOMAIN})`); });
+let secondaryAuth = null;
+async function getSecondaryAuth() {
+  if (secondaryAuth) return secondaryAuth;
+  const sec = getApps().find(a => a.name === "secondary") || initializeApp(CFG.firebase, "secondary");
+  secondaryAuth = getAuth(sec);
+  try { await setPersistence(secondaryAuth, inMemoryPersistence); } catch (_) {}
+  return secondaryAuth;
+}
+$("#userForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const name = $("#uName").value.trim(), pin = $("#uPin").value.trim(), role = $("#uRole").value;
+  const login = nameToLogin(name);
+  if (!login) return showMsg("Introdu un nume valid.");
+  if (!/^\d{6,}$/.test(pin)) return showMsg("PIN-ul trebuie să conțină minim 6 cifre.");
+  if (state.users.some(u => u.login === login)) return showMsg(`Există deja utilizatorul „${login}”.`);
+  const btn = $("#uBtn"); btn.disabled = true; btn.textContent = "Se creează…";
+  try {
+    const sAuth = await getSecondaryAuth();
+    const cred = await createUserWithEmailAndPassword(sAuth, `${login}@${DOMAIN}`, pin);
+    await setDoc(doc(db, "users", cred.user.uid), { name, login, role, active: true, createdAt: Date.now(), createdBy: state.profile.name });
+    await signOut(sAuth);
+    showMsg(`Utilizatorul ${name} (${role}) a fost creat. Se autentifică cu numele „${login}” și PIN-ul setat.`, "info");
+    $("#userForm").reset(); $("#uHint").textContent = "Autentificare: –";
+  } catch (err) {
+    showMsg("Nu s-a putut crea utilizatorul: " + errText(err));
+    try { await signOut(await getSecondaryAuth()); } catch (_) {}
+  } finally { btn.disabled = false; btn.textContent = "Creează utilizator"; }
+});
+function renderUsers() {
+  if (state.view !== "utilizatori") return;
+  const ul = $("#userList"); ul.textContent = "";
+  if (!state.users.length) { ul.append(el("li", { class: "empty" }, "Niciun utilizator încărcat.")); return; }
+  for (const u of state.users) {
+    const self = u.uid === state.user.uid;
+    const roleSel = el("select", { onchange: ev => fire(updateDoc(doc(db, "users", u.uid), { role: ev.target.value }), `${u.name}: rol ${ev.target.value}.`) },
+      ...["operator", "supervisor", "admin"].map(r => el("option", { value: r, ...(u.role === r ? { selected: "" } : {}) }, r)));
+    if (self) roleSel.disabled = true;
+    const tog = el("button", { type: "button", class: "btn small" + (u.active ? "" : " primary") }, u.active ? "Dezactivează" : "Activează");
+    if (self) { tog.disabled = true; tog.title = "Nu te poți dezactiva singur."; }
+    tog.addEventListener("click", () => fire(updateDoc(doc(db, "users", u.uid), { active: !u.active }), `${u.name}: ${u.active ? "dezactivat" : "activat"}.`));
+    ul.append(el("li", { class: u.active ? "" : "inactive" },
+      el("span", { class: "uname" }, u.name, self ? " (tu)" : ""), el("span", { class: "pill" }, u.login || ""), roleSel, tog));
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Reîmprospătare periodică (cronometre, stări „fără activitate”)      */
+/* ------------------------------------------------------------------ */
+setInterval(() => {
+  if (!state.profile) return;
+  if (state.view === "operator") updateCardsDyn();
+  if (state.view === "supervizor") renderSupervisor();
+}, 5000);
+window.addEventListener("online", () => showMsg("Conexiune restabilită – datele în așteptare se trimit.", "info"));
+window.addEventListener("offline", () => showMsg("Ești offline. Poți continua; datele se salvează local și se trimit când revine conexiunea.", "warn"));
+</script>
+</body>
+</html>
