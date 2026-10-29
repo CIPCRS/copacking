@@ -101,7 +101,7 @@ input[readonly]{background:var(--bg)}
 .btn{min-height:46px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);font-size:15px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px}
 .btn.primary{background:var(--accent);color:var(--accent-text);border-color:transparent}
 .btn.danger{background:var(--danger);color:#fff;border-color:transparent}
-.btn.danger.armed{background:var(--danger-dark);animation:pulse 1s infinite}
+.btn.danger.armed,.btn.armed{background:var(--danger-dark);color:#fff!important;border-color:transparent;animation:pulse 1s infinite}
 .btn.small{min-height:38px;font-size:14px;padding:0 10px}
 .btn.block{width:100%}
 .btn:disabled{opacity:.45;cursor:not-allowed;animation:none}
@@ -416,7 +416,7 @@ textarea{width:100%;min-height:80px;padding:10px;border:1px solid var(--line);bo
 <script type="module">
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword, setPersistence, inMemoryPersistence, EmailAuthProvider, reauthenticateWithCredential, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-import { initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, addDoc, setDoc, updateDoc, getDoc, getDocs, onSnapshot, query, where, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import { initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, addDoc, setDoc, updateDoc, deleteDoc, getDoc, getDocs, onSnapshot, query, where, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 /* ------------------------------------------------------------------ */
 /* Inițializare                                                        */
@@ -846,7 +846,8 @@ function buildCard(p) {
       <button type="button" class="btn b-check">Salvează verificare fără poză</button>
     </div>
     <div class="close-msg dyn-close"></div>
-    <button type="button" class="btn danger block b-close">Închide PO</button>`;
+    <button type="button" class="btn danger block b-close">Închide PO</button>
+    <button type="button" class="btn small block b-del hidden" style="margin-top:8px;color:var(--danger)">🗑 Șterge PO</button>`;
   $(".po-num", card).textContent = "PO " + p.po;
   $(".po-art", card).textContent = p.art;
   $(".f-qty", card).value = p.qty; $(".f-pct", card).value = p.pct;
@@ -880,6 +881,7 @@ function updateCard(card, p) {
   cm.classList.toggle("ok", done);
   const bc = $(".b-close", card);
   bc.disabled = !done;
+  $(".b-del", card).classList.toggle("hidden", !isAdmin());
   if (!done && bc.dataset.armed === "1") disarm(bc);
 }
 function updateCardsDyn() {
@@ -928,6 +930,7 @@ cardsEl.addEventListener("click", e => {
   if (btn.classList.contains("b-photo")) startPhoto(p, card, btn);
   else if (btn.classList.contains("b-check")) saveCheck(p, card);
   else if (btn.classList.contains("b-close")) closePO(p, btn);
+  else if (btn.classList.contains("b-del")) armDelete(btn, p);
 });
 cardsEl.addEventListener("change", e => {
   const inp = e.target; if (!inp.matches(".f-qty,.f-pct")) return;
@@ -1042,6 +1045,26 @@ function doClose(p) {
   fire(setDoc(doc(db, "archive", p.sid), archiveFromPO(p, endTs, state.profile.name)));
 }
 
+/* ștergere PO deschis – doar administratori: șterge evenimentul de start, toate evenimentele și pozele PO-ului */
+async function deleteOpenPO(p) {
+  if (!isAdmin()) return showMsg("Doar un administrator poate șterge un PO.");
+  if (p.end) return showMsg("PO-ul este deja închis; PO-urile închise rămân în arhivă.");
+  try {
+    const evs = await getDocs(query(collection(db, "logs"), where("sid", "==", p.sid)));
+    const jobs = [];
+    for (const d of evs.docs) { const l = d.data(); if (l.asset) jobs.push(deleteDoc(doc(db, "photos", l.asset)).catch(() => {})); jobs.push(deleteDoc(d.ref)); }
+    jobs.push(deleteDoc(doc(db, "logs", p.sid)));
+    await Promise.all(jobs);
+    alertLevels.delete(p.sid);
+    showMsg(`PO ${p.po} a fost șters (${evs.size} evenimente${evs.docs.filter(d => d.data().asset).length ? ", inclusiv pozele" : ""}).`, "info");
+  } catch (e) { showMsg("Ștergerea a eșuat: " + errText(e)); }
+}
+function armDelete(btn, p) {
+  if (btn.dataset.armed === "1") { btn.dataset.armed = ""; btn.classList.remove("armed"); btn.textContent = "🗑 Șterge PO"; clearTimeout(btn._t); btn.disabled = true; deleteOpenPO(p).finally(() => { btn.disabled = false; }); return; }
+  btn.dataset.armed = "1"; btn.classList.add("armed"); btn.textContent = "Apasă din nou – se șterge definitiv";
+  clearTimeout(btn._t); btn._t = setTimeout(() => { btn.dataset.armed = ""; btn.classList.remove("armed"); btn.textContent = "🗑 Șterge PO"; }, 5000);
+}
+
 /* istoric */
 function renderHistory() {
   const ul = $("#history"); ul.textContent = "";
@@ -1120,9 +1143,15 @@ function renderSupervisor() {
     if (p.end) status = el("span", { class: "status done" }, `Închis · ${fmtDur(p.end - p.start)}`);
     else if (now - p.last > interval) status = el("span", { class: "status warn" }, `⚠ Fără activitate de ${minutes(now - p.last)} min`);
     else status = el("span", { class: "status run" }, "În lucru");
+    const statusCell = el("td", {}, status);
+    if (!p.end && isAdmin()) {
+      const del = el("button", { type: "button", class: "btn small", style: "margin-left:8px;color:var(--danger)" }, "🗑 Șterge PO");
+      del.addEventListener("click", ev => { ev.stopPropagation(); armDelete(del, p); });
+      statusCell.append(del);
+    }
     const tr = el("tr", { class: "rowpo" + (state.expanded.has(p.sid) ? " open" : ""), dataset: { sid: p.sid } },
       el("td", {}, el("b", {}, p.po)), el("td", {}, p.art), el("td", {}, `${p.shift} · ${[...p.ops].join(", ")}`), el("td", {}, fmtDT(p.start)),
-      progressCell(p.verified, p.target, p.qty, p.pct), el("td", {}, p.photos.length), el("td", {}, fmtDT(p.last)), el("td", {}, status));
+      progressCell(p.verified, p.target, p.qty, p.pct), el("td", {}, p.photos.length), el("td", {}, fmtDT(p.last)), statusCell);
     tr.addEventListener("click", () => { state.expanded.has(p.sid) ? state.expanded.delete(p.sid) : state.expanded.add(p.sid); renderSupervisor(); });
     tb.append(tr);
     if (state.expanded.has(p.sid)) tb.append(el("tr", { class: "gallery-row" }, el("td", { colspan: 8 }, galleryFor(p.photos, "PO " + p.po))));
