@@ -235,10 +235,10 @@ tr.gallery-row td{white-space:normal;background:var(--bg)}
   <form class="card" id="newPoForm" autocomplete="off">
     <div class="row2">
       <label class="field">Număr PO *
-        <input id="npPo" type="text" required placeholder="ex. PO-4512">
+        <input id="npPo" type="text" inputmode="numeric" pattern="[0-9]+" autocomplete="off" required placeholder="doar cifre, ex. 4512">
       </label>
       <label class="field">Articol finit *
-        <input id="npArt" type="text" required placeholder="cod / denumire">
+        <input id="npArt" type="text" inputmode="numeric" pattern="[0-9]+" autocomplete="off" required placeholder="cod numeric articol">
       </label>
     </div>
     <div class="row2">
@@ -389,7 +389,7 @@ const state = {
   logs: [], pos: [], archive: [], users: [],
   view: "operator", supFilter: "all",
   expanded: new Set(), arqExpanded: new Set(),
-  pendingSid: null, unsub: {}, photoCache: new Map()
+  pendingSid: null, unsub: {}, photoCache: new Map(), interval: null
 };
 
 /* ------------------------------------------------------------------ */
@@ -435,7 +435,11 @@ function nameToLogin(name) {
 const canSup = () => !!state.profile && (state.profile.role === "supervisor" || state.profile.role === "admin");
 const isAdmin = () => !!state.profile && state.profile.role === "admin";
 function getShift() { return $("#shift").value; }
-function getInterval() { const v = Number(localStorage.getItem("cp_interval")) || 30; return v > 0 ? v : 30; }
+function getInterval() {
+  // intervalul e comun pentru toate telefoanele (Firestore: settings/app); localStorage e doar rezervă până vine primul răspuns
+  const v = Number(state.interval) || Number(localStorage.getItem("cp_interval")) || 30;
+  return v > 0 ? v : 30;
+}
 
 /* bara de mesaje */
 const msgbar = $("#msgbar");
@@ -618,6 +622,7 @@ onAuthStateChanged(auth, user => {
 function enterApp() {
   $("#btnLogout").classList.remove("hidden");
   $("#btnPin").classList.remove("hidden");
+  subscribeSettings();
   subscribeLogs();
   setView(viewFromHash());
 }
@@ -669,24 +674,62 @@ $("#interval").value = getInterval();
 $("#shift").addEventListener("change", () => localStorage.setItem("cp_shift", $("#shift").value));
 $("#interval").addEventListener("change", () => {
   let v = Number($("#interval").value); if (!(v > 0)) v = 30;
-  $("#interval").value = v; localStorage.setItem("cp_interval", v); updateCardsDyn();
+  $("#interval").value = v; localStorage.setItem("cp_interval", v); state.interval = v; updateCardsDyn();
+  fire(setDoc(doc(db, "settings", "app"), { interval: v, updatedBy: state.profile.name, updatedAt: Date.now() }, { merge: true }),
+    `Interval poze setat la ${v} min pentru toate telefoanele.`);
 });
+function subscribeSettings() {
+  state.unsub.settings = onSnapshot(doc(db, "settings", "app"), snap => {
+    const d = snap.exists() ? snap.data() : null;
+    if (d && Number(d.interval) > 0) {
+      state.interval = Number(d.interval);
+      localStorage.setItem("cp_interval", state.interval);
+      if (document.activeElement !== $("#interval")) $("#interval").value = state.interval;
+      updateCardsDyn();
+      if (state.view === "supervizor") renderSupervisor();
+    }
+  }, err => console.warn("settings:", err));
+}
 function updateNpHint() {
   const t = calcTarget($("#npQty").value, $("#npPct").value);
   $("#npHint").textContent = t ? `Țintă: ${t} piese de verificat (minim ${MIN_PHOTO_PIECES}, primele ${MIN_PHOTO_PIECES} cu poză).` : "Țintă: –";
 }
 $("#npQty").addEventListener("input", updateNpHint); $("#npPct").addEventListener("input", updateNpHint);
 
-$("#newPoForm").addEventListener("submit", e => {
+// doar cifre în câmpurile PO și articol (se curăță și la lipire)
+for (const id of ["#npPo", "#npArt"]) $(id).addEventListener("input", e => { const v = e.target.value.replace(/\D+/g, ""); if (v !== e.target.value) e.target.value = v; });
+
+/* un număr de PO poate fi pornit o singură dată, indiferent de operator; verificăm local (ultimele zile), în jurnal și în arhivă */
+async function poAlreadyUsed(po) {
+  const local = state.pos.find(p => p.po === po);
+  if (local) return local.end ? `PO ${po} a fost deja închis (${fmtDT(local.end)}, ${local.endBy || [...local.ops][0] || ""}).` : `PO ${po} este deja activ (pornit de ${[...local.ops][0] || "alt operator"}).`;
+  const [starts, arch] = await Promise.all([
+    getDocs(query(collection(db, "logs"), where("type", "==", "start"), where("po", "==", po), limit(1))),
+    getDocs(query(collection(db, "archive"), where("po", "==", po), limit(1)))
+  ]);
+  if (!arch.empty) { const a = arch.docs[0].data(); return `PO ${po} a fost deja închis (${fmtDT(a.end)}, ${a.closedBy || (a.operators || [])[0] || ""}).`; }
+  if (!starts.empty) { const l = starts.docs[0].data(); return `PO ${po} a fost deja pornit (${fmtDT(l.ts)}, ${l.op || ""}).`; }
+  return null;
+}
+$("#newPoForm").addEventListener("submit", async e => {
   e.preventDefault();
-  const po = $("#npPo").value.trim(), art = $("#npArt").value.trim();
+  const po = $("#npPo").value.replace(/\D+/g, ""), art = $("#npArt").value.replace(/\D+/g, "");
   const qty = Math.floor(Number($("#npQty").value)), pct = Number($("#npPct").value);
-  if (!po || !art) return showMsg("Completează numărul PO și articolul.");
+  if (!po || !art) return showMsg("Completează numărul PO și articolul (doar cifre).");
   if (!(qty > 0)) return showMsg("Cantitatea totală trebuie să fie mai mare decât 0.");
   if (!(pct > 0 && pct <= 100)) return showMsg("Procentul de verificat trebuie să fie între 0 și 100.");
-  if (state.pos.some(p => !p.end && p.po.toLowerCase() === po.toLowerCase())) return showMsg(`Există deja un PO activ cu numărul ${po}.`);
-  fire(addDoc(collection(db, "logs"), { type: "start", ts: Date.now(), shift: getShift(), op: state.profile.name, uid: state.user.uid, po, art, qty, pct }), `PO ${po} pornit.`);
-  $("#newPoForm").reset(); $("#npPct").value = 5; updateNpHint();
+  const btn = $("#newPoForm button[type=submit]"); btn.disabled = true; btn.textContent = "Se verifică PO-ul…";
+  try {
+    let used;
+    try { used = await poAlreadyUsed(po); }
+    catch (err) {
+      // offline sau fără răspuns: nu permitem pornirea fără verificare
+      return showMsg("Nu s-a putut verifica dacă PO-ul a mai fost folosit (" + errText(err) + "). Încearcă din nou când ai conexiune.");
+    }
+    if (used) return showMsg(used + " Un PO nu poate fi pornit a doua oară.");
+    fire(addDoc(collection(db, "logs"), { type: "start", ts: Date.now(), shift: getShift(), op: state.profile.name, uid: state.user.uid, po, art, qty, pct }), `PO ${po} pornit.`);
+    $("#newPoForm").reset(); $("#npPct").value = 5; updateNpHint();
+  } finally { btn.disabled = false; btn.textContent = "Pornește PO"; }
 });
 
 const cardsEl = $("#cards");
