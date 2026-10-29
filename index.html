@@ -111,7 +111,8 @@ input[readonly]{background:var(--bg)}
 .po-num{font-size:18px;font-weight:700}
 .po-art{font-size:14px;color:var(--muted);word-break:break-word}
 .timer{font-size:13px;padding:6px 9px;border-radius:8px;background:var(--bg);white-space:nowrap;flex:none}
-.timer.over{background:var(--warn-bg);color:var(--warn);font-weight:700}
+.timer.over{background:var(--danger);color:#fff;font-weight:700;animation:pulse 1s infinite;white-space:normal;text-align:center}
+.po.alert{border-color:var(--danger);box-shadow:0 0 0 2px var(--danger)}
 .prog{font-size:14px;font-weight:600}
 .bar{height:10px;background:var(--line);border-radius:6px;overflow:hidden;margin:6px 0 12px}
 .bar-fill{height:100%;background:var(--accent);width:0;transition:width .3s}
@@ -684,8 +685,11 @@ function updateCard(card, p) {
   const now = Date.now(), interval = getInterval();
   const since = now - p.lastPhoto, over = since > interval * 60000;
   const timer = $(".dyn-timer", card);
-  timer.textContent = (p.photos.length ? "Ultima poză: " : "Fără poză · start: ") + fmtAgo(since);
+  if (over) timer.textContent = `⚠ Nu ai făcut poză de ${fmtDur(since)}` + (p.photos.length ? "" : " (de la start)");
+  else timer.textContent = (p.photos.length ? "Ultima poză: " : "Fără poză · start: ") + fmtAgo(since);
   timer.classList.toggle("over", over);
+  card.classList.toggle("alert", over);
+  checkPhotoAlert(p, since, interval);
   $(".dyn-prog", card).textContent = `Verificat ${p.verified} / ${p.target} · ${p.qty} buc · ${p.pct}% · 📷 ${p.photos.length}`;
   const bar = $(".dyn-bar", card);
   bar.style.width = (p.target ? Math.min(100, p.verified / p.target * 100) : 0) + "%";
@@ -715,6 +719,37 @@ function updateCardsDyn() {
   }
 }
 function poOf(card) { return state.pos.find(x => x.sid === card.dataset.sid); }
+
+/* alertă sonoră + vibrație + mesaj când a trecut intervalul fără poză (o dată pe interval, per PO) */
+const alertLevels = new Map();
+let audioCtx = null;
+function primeAudio() {
+  try { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === "suspended") audioCtx.resume(); } catch (_) {}
+}
+document.addEventListener("pointerdown", primeAudio, { passive: true });
+document.addEventListener("keydown", primeAudio);
+function beep() {
+  try {
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    for (let i = 0; i < 3; i++) {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = "square"; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, t + i * 0.35); g.gain.exponentialRampToValueAtTime(0.4, t + i * 0.35 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.35 + 0.25);
+      o.connect(g).connect(audioCtx.destination); o.start(t + i * 0.35); o.stop(t + i * 0.35 + 0.3);
+    }
+  } catch (_) {}
+}
+function checkPhotoAlert(p, since, intervalMin) {
+  const level = Math.floor(since / (intervalMin * 60000));   // 0 = în interval, 1 = depășit o dată, 2 = de două ori...
+  const prev = alertLevels.get(p.sid) || 0;
+  if (level > prev) {
+    alertLevels.set(p.sid, level);
+    beep();
+    try { if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 400]); } catch (_) {}
+    showMsg(`PO ${p.po}: nu ai făcut poză de ${fmtDur(since)}! Fă o poză acum.`, "error");
+  } else if (level < prev) alertLevels.set(p.sid, level);   // s-a făcut poză: resetăm
+}
 
 cardsEl.addEventListener("click", e => {
   const btn = e.target.closest("button"); if (!btn) return;
