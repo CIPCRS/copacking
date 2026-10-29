@@ -167,6 +167,10 @@ tr.gallery-row td{white-space:normal;background:var(--bg)}
 #lightbox .cap{color:#ddd;font-size:14px;margin-top:10px;text-align:center}
 #lightbox .lb-close{position:absolute;top:calc(12px + env(safe-area-inset-top));right:12px;width:48px;height:48px;border-radius:50%;border:0;background:rgba(255,255,255,.2);color:#fff;font-size:26px}
 
+/* modal */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:250;display:flex;align-items:center;justify-content:center;padding:16px}
+.modal .card{width:100%;max-width:380px}
+
 /* login */
 .login{max-width:400px;margin:30px auto}
 .login h2{margin-top:0}
@@ -187,6 +191,7 @@ tr.gallery-row td{white-space:normal;background:var(--bg)}
 <header class="topbar" id="topbar">
   <h1>Copacking</h1>
   <span class="who" id="who"></span>
+  <button type="button" id="btnPin" class="hidden" title="Schimbă PIN-ul">PIN</button>
   <button type="button" id="btnLogout" class="hidden">Ieșire</button>
 </header>
 <nav class="tabs hidden" id="tabs"></nav>
@@ -329,6 +334,25 @@ tr.gallery-row td{white-space:normal;background:var(--bg)}
 
 </main>
 
+<div id="pinModal" class="modal hidden">
+  <form class="card" id="pinForm" autocomplete="off">
+    <h3>Schimbă PIN-ul</h3>
+    <label class="field">PIN actual
+      <input id="pinOld" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password" required>
+    </label>
+    <label class="field">PIN nou (minim 6 cifre)
+      <input id="pinNew" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" required>
+    </label>
+    <label class="field">Repetă PIN-ul nou
+      <input id="pinNew2" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" required>
+    </label>
+    <div class="actions">
+      <button type="button" class="btn" id="pinCancel">Renunță</button>
+      <button type="submit" class="btn primary" id="pinSave">Salvează</button>
+    </div>
+  </form>
+</div>
+
 <div id="lightbox" class="hidden">
   <button type="button" class="lb-close" id="lbClose" aria-label="Închide">×</button>
   <img id="lbImg" alt="">
@@ -339,7 +363,7 @@ tr.gallery-row td{white-space:normal;background:var(--bg)}
 
 <script type="module">
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword, setPersistence, inMemoryPersistence } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword, setPersistence, inMemoryPersistence, EmailAuthProvider, reauthenticateWithCredential, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, addDoc, setDoc, updateDoc, getDoc, getDocs, onSnapshot, query, where, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 /* ------------------------------------------------------------------ */
@@ -532,12 +556,39 @@ $("#loginForm").addEventListener("submit", async e => {
 });
 $("#btnLogout").addEventListener("click", () => signOut(auth));
 
+/* schimbare PIN (utilizatorul curent) */
+const pinModal = $("#pinModal");
+function openPin() { $("#pinForm").reset(); pinModal.classList.remove("hidden"); setTimeout(() => $("#pinOld").focus(), 50); }
+function closePin() { pinModal.classList.add("hidden"); }
+$("#btnPin").addEventListener("click", openPin);
+$("#pinCancel").addEventListener("click", closePin);
+pinModal.addEventListener("click", e => { if (e.target === pinModal) closePin(); });
+$("#pinForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const oldPin = $("#pinOld").value.trim(), n1 = $("#pinNew").value.trim(), n2 = $("#pinNew2").value.trim();
+  if (!/^\d{6,}$/.test(n1)) return showMsg("PIN-ul nou trebuie să aibă minim 6 cifre.");
+  if (n1 !== n2) return showMsg("PIN-ul nou nu coincide cu repetarea lui.");
+  if (n1 === oldPin) return showMsg("PIN-ul nou trebuie să fie diferit de cel actual.");
+  const btn = $("#pinSave"); btn.disabled = true; btn.textContent = "Se salvează…";
+  try {
+    const user = auth.currentUser;
+    const cred = EmailAuthProvider.credential(user.email, oldPin);
+    await reauthenticateWithCredential(user, cred);
+    await updatePassword(user, n1);
+    closePin();
+    showMsg("PIN-ul a fost schimbat. Folosește-l la următoarea autentificare.", "info");
+  } catch (err) {
+    showMsg(/invalid-credential|wrong-password|invalid-login/.test((err && err.code) || "") ? "PIN-ul actual este greșit." : "Nu s-a putut schimba PIN-ul: " + errText(err));
+  } finally { btn.disabled = false; btn.textContent = "Salvează"; }
+});
+
 function unsubAll() { for (const k of Object.keys(state.unsub)) { try { state.unsub[k](); } catch (_) {} } state.unsub = {}; }
 function showLogin() {
   for (const k of Object.keys(VIEWS)) $("#screen-" + k).classList.add("hidden");
   $("#screen-login").classList.remove("hidden");
   $("#tabs").classList.add("hidden");
   $("#btnLogout").classList.add("hidden");
+  $("#btnPin").classList.add("hidden");
   $("#who").textContent = "";
   $("#cards").textContent = ""; $("#history").textContent = "";
 }
@@ -566,6 +617,7 @@ onAuthStateChanged(auth, user => {
 
 function enterApp() {
   $("#btnLogout").classList.remove("hidden");
+  $("#btnPin").classList.remove("hidden");
   subscribeLogs();
   setView(viewFromHash());
 }
