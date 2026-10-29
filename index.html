@@ -697,7 +697,12 @@ function updateNpHint() {
 $("#npQty").addEventListener("input", updateNpHint); $("#npPct").addEventListener("input", updateNpHint);
 
 // doar cifre în câmpurile PO și articol (se curăță și la lipire)
-for (const id of ["#npPo", "#npArt"]) $(id).addEventListener("input", e => { const v = e.target.value.replace(/\D+/g, ""); if (v !== e.target.value) e.target.value = v; });
+for (const id of ["#npPo", "#npArt"]) {
+  const inp = $(id);
+  inp.addEventListener("beforeinput", e => { if (e.data && /\D/.test(e.data)) e.preventDefault(); });             // tastatură fizică (desktop): literele nu intră deloc
+  inp.addEventListener("keydown", e => { if (e.key.length === 1 && /\D/.test(e.key) && !e.ctrlKey && !e.metaKey) e.preventDefault(); });
+  inp.addEventListener("input", e => { const v = e.target.value.replace(/\D+/g, ""); if (v !== e.target.value) e.target.value = v; }); // lipire / autocompletare
+}
 
 /* un număr de PO poate fi pornit o singură dată, indiferent de operator; verificăm local (ultimele zile), în jurnal și în arhivă */
 async function poAlreadyUsed(po) {
