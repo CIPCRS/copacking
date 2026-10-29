@@ -402,7 +402,9 @@ function calcTarget(qty, pct) {
   return Math.min(qty, Math.max(MIN_PHOTO_PIECES, Math.ceil(qty * pct / 100)));
 }
 function nameToLogin(name) {
-  return String(name || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+  name = String(name || "").trim();
+  if (name.includes("@")) name = name.split("@")[0];      // acceptă și forma nume@domeniu
+  return name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
     .replace(/[^a-z0-9]+/g, ".").replace(/^\.+|\.+$/g, "");
 }
 const canSup = () => !!state.profile && (state.profile.role === "supervisor" || state.profile.role === "admin");
@@ -544,9 +546,11 @@ onAuthStateChanged(auth, user => {
   state.user = user; state.profile = null;
   state.logs = []; state.pos = []; state.archive = []; state.users = [];
   if (!user) { showLogin(); return; }
-  state.unsub.profile = onSnapshot(doc(db, "users", user.uid), snap => {
+  state.unsub.profile = onSnapshot(doc(db, "users", user.uid), { includeMetadataChanges: true }, snap => {
     const d = snap.exists() ? snap.data() : null;
     if (!d || d.active !== true) {
+      // profil lipsă / inactiv: decidem doar pe baza răspunsului serverului, nu a cache-ului local
+      if (snap.metadata.fromCache) return;
       showMsg("Contul nu este autorizat sau a fost dezactivat. Contactează un administrator.");
       signOut(auth);
       return;
