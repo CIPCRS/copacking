@@ -81,7 +81,8 @@ small,.muted{color:var(--muted)}
 main{padding:12px calc(12px + env(safe-area-inset-right)) 12px calc(12px + env(safe-area-inset-left));max-width:1280px;margin:0 auto}
 
 /* comutator Operator: PO nou / PO-uri active */
-.opswitch{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
+.opswitch{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0}
+@media (max-width:640px){.opswitch{grid-template-columns:1fr 1fr}}
 .opswitch button{min-height:56px;border-radius:12px;border:2px solid var(--line);background:var(--card);color:var(--text);font-size:17px;font-weight:700}
 .opswitch button.active{background:var(--accent);color:var(--accent-text);border-color:transparent}
 .opswitch button .cnt{display:inline-block;min-width:26px;padding:2px 8px;margin-left:6px;border-radius:999px;background:rgba(255,255,255,.25);font-size:14px}
@@ -261,15 +262,19 @@ textarea{width:100%;min-height:80px;padding:10px;border:1px solid var(--line);bo
   </div>
 
   <div class="opswitch">
-    <button type="button" id="swNew">＋ PO nou</button>
-    <button type="button" id="swActive">PO-uri active <span class="cnt" id="swActiveCnt">0</span></button>
+    <button type="button" id="swPlanned">📋 PO planificate <span class="cnt" id="swPlannedCnt">0</span></button>
+    <button type="button" id="swNew">＋ PO nou neplanificat</button>
+    <button type="button" id="swActive">▶ PO-uri active <span class="cnt" id="swActiveCnt">0</span></button>
+    <button type="button" id="swHist">🕘 Istoric verificări <span class="cnt" id="histCnt">0</span></button>
   </div>
 
-  <div id="paneNew">
+  <div id="panePlanned" class="hidden">
   <h2>PO-uri planificate <small id="plannedCount"></small></h2>
   <div class="planlist" id="plannedList"></div>
-  <div class="empty hidden" id="plannedEmpty">Niciun PO planificat. Poți porni unul neplanificat mai jos.</div>
+  <div class="empty hidden" id="plannedEmpty">Niciun PO planificat. Poți porni unul neplanificat din „PO nou neplanificat”.</div>
+  </div>
 
+  <div id="paneNew" class="hidden">
   <h2>PO nou neplanificat</h2>
   <form class="card" id="newPoForm" autocomplete="off">
     <div class="row2">
@@ -296,10 +301,11 @@ textarea{width:100%;min-height:80px;padding:10px;border:1px solid var(--line);bo
   <div id="paneActive" class="hidden">
   <h2>PO-uri active <small id="activeCount"></small></h2>
   <div class="grid" id="cards"></div>
-  <div class="empty hidden" id="cardsEmpty">Niciun PO activ. Apasă „PO nou” pentru a porni unul.</div>
+  <div class="empty hidden" id="cardsEmpty">Niciun PO activ. Pornește unul din „PO planificate” sau „PO nou neplanificat”.</div>
+  </div>
 
-  <button type="button" class="btn block" id="histToggle" style="margin-top:6px">▸ Istoric verificări <span class="cnt" id="histCnt" style="margin-left:6px;padding:2px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:14px">0</span></button>
-  <div id="histPane" class="hidden">
+  <div id="paneHist" class="hidden">
+    <h2>Istoric verificări</h2>
     <div class="toolbar">
       <input id="histFrom" type="date" title="De la">
       <input id="histTo" type="date" title="Până la">
@@ -309,7 +315,6 @@ textarea{width:100%;min-height:80px;padding:10px;border:1px solid var(--line);bo
     </div>
     <small id="histInfo"></small>
     <ul class="hist" id="history" style="margin-top:8px"></ul>
-  </div>
   </div>
 </section>
 
@@ -406,7 +411,7 @@ textarea{width:100%;min-height:80px;padding:10px;border:1px solid var(--line);bo
 
   <h2>Import din Excel</h2>
   <div class="card">
-    <p class="muted" style="margin:0 0 8px;font-size:14px">Fișier .xlsx / .xls / .csv cu un rând de antet. Coloane recunoscute (ordinea nu contează): <b>PO</b>, <b>Articol</b>, <b>Cantitate</b>, <b>Procent</b> (opțional, implicit 5), <b>Data</b> (opțional), <b>Tura</b> (opțional), <b>Observatii</b> (opțional).</p>
+    <p class="muted" style="margin:0 0 8px;font-size:14px">Fișier .xlsx / .xls / .csv cu un rând de antet. Coloane recunoscute (ordinea nu contează): <b>PO</b>, <b>Articol</b>, <b>Cantitate</b>, <b>Procent</b> (opțional, implicit 5), <b>Data</b> (opțional, implicit ziua importului), <b>Tura</b> (opțional), <b>Observatii</b> (opțional).</p>
     <div class="toolbar">
       <input type="file" id="xlsFile" accept=".xlsx,.xls,.csv" style="min-height:46px">
       <button class="btn small" type="button" id="btnTemplate">⬇ Model Excel</button>
@@ -671,7 +676,7 @@ function setView(v) {
   renderTabs();
   if (v === "operator") renderOperator();
   if (v === "supervizor") { renderSupervisor(); renderSentList(); }
-  if (v === "planificare") renderPlans();
+  if (v === "planificare") { if (!$("#plDate").value) $("#plDate").value = todayStr(); renderPlans(); }
   if (v === "arhiva") { subscribeArchive(); renderArchive(); }
   if (v === "utilizatori") { subscribeUsers(); renderUsers(); }
 }
@@ -901,6 +906,7 @@ function fmtDate(d) { if (!d) return ""; const [y, m, dd] = d.split("-"); return
 function renderPlannedForOperator() {
   const list = state.plans.filter(p => p.status === "planned").sort(planSort);
   $("#plannedCount").textContent = list.length ? `(${list.length})` : "";
+  $("#swPlannedCnt").textContent = list.length;
   $("#plannedEmpty").classList.toggle("hidden", list.length > 0);
   const box = $("#plannedList"); box.textContent = "";
   const today = todayStr();
@@ -955,7 +961,7 @@ $("#planForm").addEventListener("submit", async e => {
   const btn = $("#planForm button[type=submit]"); btn.disabled = true;
   try {
     const used = await poAlreadyUsed(po); if (used) return showMsg(used);
-    await addPlan({ po, art, qty, pct, date: $("#plDate").value || "", shift: $("#plShift").value || "", note: $("#plNote").value.trim() });
+    await addPlan({ po, art, qty, pct, date: $("#plDate").value || todayStr(), shift: $("#plShift").value || "", note: $("#plNote").value.trim() });
     showMsg(`PO ${po} adăugat în planificare.`, "info");
     $("#plPo").value = ""; $("#plArt").value = ""; $("#plQty").value = ""; $("#plNote").value = ""; $("#plPo").focus();
   } catch (err) { showMsg("Nu s-a putut salva: " + errText(err)); }
@@ -1013,7 +1019,7 @@ async function parseExcel(file) {
     const qty = Math.floor(Number(String(g("qty")).replace(",", "."))), pctRaw = String(g("pct")).replace("%", "").replace(",", ".").trim();
     let pct = pctRaw === "" ? 5 : Number(pctRaw); if (pct > 0 && pct < 1 && pctRaw.indexOf(".") >= 0 && Number(pctRaw) <= 1 && idx.pct >= 0 && typeof r[idx.pct] === "number") pct = pct * 100;   // 0.05 formatat ca procent în Excel
     pct = Math.round(pct * 10) / 10;
-    const rec = { row: i + 1, po, art, qty, pct, date: excelDate(g("date")), shift: parseShift(g("shift")), note: String(g("note")).trim().slice(0, 200), err: "" };
+    const rec = { row: i + 1, po, art, qty, pct, date: excelDate(g("date")) || todayStr(), shift: parseShift(g("shift")), note: String(g("note")).trim().slice(0, 200), err: "" };
     if (!po) rec.err = "PO lipsă/nenumeric"; else if (!art) rec.err = "articol lipsă/nenumeric"; else if (!(qty > 0)) rec.err = "cantitate invalidă"; else if (!(pct > 0 && pct <= 100)) rec.err = "procent invalid";
     else if (planExists(po) || out.some(x => x.po === po && !x.err)) rec.err = "PO deja planificat";
     out.push(rec);
@@ -1058,17 +1064,16 @@ $("#btnTemplate").addEventListener("click", async () => {
 });
 
 const cardsEl = $("#cards");
-let opPane = localStorage.getItem("cp_pane") || "active";
+const PANES = { planned: ["#panePlanned", "#swPlanned"], new: ["#paneNew", "#swNew"], active: ["#paneActive", "#swActive"], hist: ["#paneHist", "#swHist"] };
+let opPane = PANES[localStorage.getItem("cp_pane")] ? localStorage.getItem("cp_pane") : "active";
 function setPane(p) {
+  if (!PANES[p]) p = "active";
   opPane = p; localStorage.setItem("cp_pane", p);
-  $("#paneNew").classList.toggle("hidden", p !== "new");
-  $("#paneActive").classList.toggle("hidden", p !== "active");
-  $("#swNew").classList.toggle("active", p === "new");
-  $("#swActive").classList.toggle("active", p === "active");
+  for (const [k, [pane, btn]] of Object.entries(PANES)) { $(pane).classList.toggle("hidden", k !== p); $(btn).classList.toggle("active", k === p); }
   if (p === "new") setTimeout(() => $("#npPo").focus(), 50);
+  if (p === "hist") renderHistory();
 }
-$("#swNew").addEventListener("click", () => setPane("new"));
-$("#swActive").addEventListener("click", () => setPane("active"));
+for (const [k, [, btn]] of Object.entries(PANES)) $(btn).addEventListener("click", () => setPane(k));
 setPane(opPane);
 function renderOperator() {
   const active = state.pos.filter(p => !p.end);
@@ -1356,10 +1361,8 @@ function armDelete(btn, p) {
 }
 
 /* istoric – ascuns sub buton, cu filtru pe dată (implicit: azi) */
-let histOpen = false;
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 $("#histFrom").value = todayStr(); $("#histTo").value = todayStr();
-$("#histToggle").addEventListener("click", () => { histOpen = !histOpen; $("#histPane").classList.toggle("hidden", !histOpen); $("#histToggle").firstChild.textContent = (histOpen ? "▾" : "▸") + " Istoric verificări "; renderHistory(); });
 $("#histToday").addEventListener("click", () => { $("#histFrom").value = todayStr(); $("#histTo").value = todayStr(); renderHistory(); });
 $("#histAll").addEventListener("click", () => { $("#histFrom").value = ""; $("#histTo").value = ""; renderHistory(); });
 $("#histFrom").addEventListener("input", renderHistory); $("#histTo").addEventListener("input", renderHistory);
@@ -1371,7 +1374,7 @@ function historyFiltered() {
 function renderHistory() {
   const all = historyFiltered();
   $("#histCnt").textContent = all.length;
-  if (!histOpen) return;
+  if (opPane !== "hist") return;
   const ul = $("#history"); ul.textContent = "";
   const evs = all.slice(0, 100);
   $("#histInfo").textContent = all.length ? `${all.length} verificări în perioada aleasă` + (all.length > 100 ? " (afișate ultimele 100)" : "") : "nicio verificare în perioada aleasă";
