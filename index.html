@@ -283,12 +283,18 @@ textarea{width:100%;min-height:80px;padding:10px;border:1px solid var(--line);bo
   <div class="grid" id="cards"></div>
   <div class="empty hidden" id="cardsEmpty">Niciun PO activ. Apasă „PO nou” pentru a porni unul.</div>
 
-  <h2>Istoric verificări</h2>
-  <div class="toolbar">
-    <button class="btn small" type="button" id="btnCsvLogs">⬇ Export CSV</button>
+  <button type="button" class="btn block" id="histToggle" style="margin-top:6px">▸ Istoric verificări <span class="cnt" id="histCnt" style="margin-left:6px;padding:2px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:14px">0</span></button>
+  <div id="histPane" class="hidden">
+    <div class="toolbar">
+      <input id="histFrom" type="date" title="De la">
+      <input id="histTo" type="date" title="Până la">
+      <button class="btn small" type="button" id="histToday">Azi</button>
+      <button class="btn small" type="button" id="histAll">Toate</button>
+      <button class="btn small" type="button" id="btnCsvLogs">⬇ Export CSV</button>
+    </div>
     <small id="histInfo"></small>
+    <ul class="hist" id="history" style="margin-top:8px"></ul>
   </div>
-  <ul class="hist" id="history"></ul>
   </div>
 </section>
 
@@ -1092,11 +1098,26 @@ function armDelete(btn, p) {
   clearTimeout(btn._t); btn._t = setTimeout(() => { btn.dataset.armed = ""; btn.classList.remove("armed"); btn.textContent = "🗑 Șterge PO"; }, 5000);
 }
 
-/* istoric */
+/* istoric – ascuns sub buton, cu filtru pe dată (implicit: azi) */
+let histOpen = false;
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+$("#histFrom").value = todayStr(); $("#histTo").value = todayStr();
+$("#histToggle").addEventListener("click", () => { histOpen = !histOpen; $("#histPane").classList.toggle("hidden", !histOpen); $("#histToggle").firstChild.textContent = (histOpen ? "▾" : "▸") + " Istoric verificări "; renderHistory(); });
+$("#histToday").addEventListener("click", () => { $("#histFrom").value = todayStr(); $("#histTo").value = todayStr(); renderHistory(); });
+$("#histAll").addEventListener("click", () => { $("#histFrom").value = ""; $("#histTo").value = ""; renderHistory(); });
+$("#histFrom").addEventListener("input", renderHistory); $("#histTo").addEventListener("input", renderHistory);
+function historyFiltered() {
+  const from = $("#histFrom").value ? new Date($("#histFrom").value + "T00:00:00").getTime() : null;
+  const to = $("#histTo").value ? new Date($("#histTo").value + "T23:59:59.999").getTime() : null;
+  return state.logs.filter(l => (l.type === "photo" || l.type === "check") && (!from || l.ts >= from) && (!to || l.ts <= to)).sort((a, b) => b.ts - a.ts);
+}
 function renderHistory() {
+  const all = historyFiltered();
+  $("#histCnt").textContent = all.length;
+  if (!histOpen) return;
   const ul = $("#history"); ul.textContent = "";
-  const evs = state.logs.filter(l => l.type === "photo" || l.type === "check").sort((a, b) => b.ts - a.ts).slice(0, 60);
-  $("#histInfo").textContent = evs.length ? `ultimele ${evs.length} verificări` : "nicio verificare încă";
+  const evs = all.slice(0, 100);
+  $("#histInfo").textContent = all.length ? `${all.length} verificări în perioada aleasă` + (all.length > 100 ? " (afișate ultimele 100)" : "") : "nicio verificare în perioada aleasă";
   for (const l of evs) {
     const li = el("li");
     if (l.type === "photo") {
