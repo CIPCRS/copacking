@@ -89,7 +89,7 @@ Ceilalți utilizatori îi creezi din aplicație (pasul 7).
 
 ## 6. Publică aplicația (hosting)
 
-`index.html` trebuie servit prin **https** (camera telefonului și cache-ul offline funcționează doar pe https sau pe `localhost`). Trei variante gratuite:
+`index.html` trebuie servit prin **https** (camera telefonului și cache-ul offline funcționează doar pe https sau pe `localhost`). Două variante gratuite:
 
 ### Varianta A – Netlify Drop (cea mai rapidă, fără instalare)
 
@@ -110,28 +110,9 @@ firebase deploy --only hosting
 
 Adresa va fi `https://PROJECT_ID.web.app`.
 
-### Varianta C – GitHub Pages (gratuit, din repo-ul de pe GitHub)
-
-1. Creează un repository nou pe <https://github.com/new> (ex. `copacking`), **public** sau privat (GitHub Pages pe repo privat cere plan plătit – pentru gratuit, repo public; aplicația nu conține secrete, cheile Firebase web sunt publice prin design, accesul e protejat de regulile Firestore).
-2. Urcă fișierele din pachet (`index.html`, `firestore.rules`, `SETUP.md`, `README.md`, `.nojekyll`, `.gitignore`) – prin **Add file → Upload files** în browser sau din terminal:
-
-```bash
-cd folderul-cu-fisierele
-git init
-git add .
-git commit -m "Copacking – versiunea initiala"
-git branch -M main
-git remote add origin https://github.com/<utilizator>/copacking.git
-git push -u origin main
-```
-
-3. În repo: **Settings → Pages → Build and deployment → Source: Deploy from a branch → Branch: `main`, folder `/ (root)` → Save**.
-4. După 1–2 minute adresa apare în aceeași pagină: `https://<utilizator>.github.io/copacking/`.
-5. La fiecare modificare a `index.html`, un nou `git push` (sau upload) republică automat.
-
 ### Autorizează domeniul (obligatoriu, altfel login-ul dă eroare `auth/unauthorized-domain`)
 
-**Authentication → Settings → Authorized domains → Add domain** → adaugă domeniul de hosting (ex. `copacking-dsv.netlify.app` sau `<utilizator>.github.io`). `localhost` și `PROJECT_ID.web.app`/`firebaseapp.com` sunt deja în listă.
+**Authentication → Settings → Authorized domains → Add domain** → adaugă domeniul de hosting (ex. `copacking-dsv.netlify.app`). `localhost` și `PROJECT_ID.web.app`/`firebaseapp.com` sunt deja în listă.
 
 ## 7. Adaugă utilizatori
 
@@ -149,10 +130,15 @@ Roluri:
 
 Ecranele au și adrese directe: `…/#supervizor`, `…/#arhiva`, `…/#utilizatori` (de ex. pentru laptopul supervizorului).
 
-## 8. Adaugă aplicația pe ecranul de start al telefonului
+## 8. Instalează aplicația pe telefon
 
-- **Android (Chrome):** deschide adresa → meniul ⋮ → **Adaugă la ecranul de pornire / Instalează aplicația**.
-- **iPhone (Safari):** deschide adresa → butonul **Partajare** (pătratul cu săgeată) → **Adaugă la ecranul principal**.
+Aplicația este o PWA (fișierele `manifest.webmanifest`, `sw.js` și iconițele `icon-*.png` trebuie să fie în repo lângă `index.html`).
+
+- **Android (Chrome):** deschide adresa, loghează-te și apasă butonul **⬇ Instalează** din bara albastră de sus (apare după câteva secunde). Alternativ: meniul ⋮ → **Instalează aplicația** / **Adaugă la ecranul de pornire**. Aplicația se deschide apoi pe tot ecranul, fără bara de adresă.
+- **iPhone (Safari):** butonul **Partajare** (pătratul cu săgeată) → **Adaugă la ecranul principal**. iOS nu oferă un buton de instalare în pagină; după adăugare aplicația rulează pe tot ecranul.
+- Dacă aplicația a fost adăugată pe ecranul de start înainte de a exista aceste fișiere, șterge iconița veche și adaug-o din nou.
+
+Service worker-ul folosește strategia *network-first*: când există internet, pagina se ia mereu de pe server (actualizările apar imediat, fără cache vechi); offline se folosește copia locală.
 
 Pe fiecare telefon: loghează-te o dată (sesiunea rămâne), setează **Tura** și **Intervalul de poze** (se rețin pe telefon).
 
@@ -185,6 +171,10 @@ Recomandări:
 **Jurnalul și arhiva.**
 - Ecranele Operator și Supervizor încarcă doar ultimele `logWindowDays` zile (implicit 60). PO-urile închise mai vechi se văd în **Arhivă**, unde rămân definitiv.
 - La închiderea unui PO, aplicația scrie automat rezumatul în `archive`. Butonul **„Importă PO-urile închise din jurnal”** reconstruiește rezumatele pentru PO-uri închise înainte de a exista arhiva sau dacă scrierea a eșuat (le sare pe cele deja existente).
+
+**Planificare PO-uri (supervizor/admin).** Tab-ul **Planificare** permite introducerea PO-urilor în avans (număr, articol, cantitate, %, dată, tură, observații) sau importul lor dintr-un fișier Excel (`.xlsx`/`.xls`/`.csv`) cu un rând de antet; coloanele recunoscute sunt **PO, Articol, Cantitate** (obligatorii) și **Procent, Data, Tura, Observatii** (opționale) – butonul „Model Excel" descarcă un șablon. Înainte de import, aplicația arată o previzualizare și marchează rândurile invalide sau cu PO deja folosit. Operatorii văd PO-urile planificate în secțiunea „PO nou" și le pornesc cu un singur buton; rămâne și opțiunea „PO nou neplanificat". Biblioteca de citire Excel (SheetJS) se încarcă de pe cdnjs doar când e nevoie, deci dispozitivul care importă are nevoie de internet.
+
+**Roluri – rezumat drepturi.** Operator: pornește PO-uri (planificate sau nu), face verificări/poze, închide PO la țintă, își schimbă PIN-ul. Supervizor: în plus vede Supervizor/Arhivă/Planificare, trimite mesaje operatorilor, planifică PO-uri. Admin: în plus gestionează utilizatorii, poate închide forțat sau șterge PO-uri active și poate șterge PO-uri închise din arhivă (împreună cu pozele lor).
 
 **Export CSV.** Fișierele folosesc separatorul `;` și BOM UTF‑8, deci se deschid corect cu dublu-click în Excel cu setări regionale românești (diacriticele se păstrează).
 

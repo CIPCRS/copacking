@@ -9,6 +9,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Copacking">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>Copacking – Jurnal verificări</title>
 
 <!-- ============================================================
@@ -221,6 +224,7 @@ textarea{width:100%;min-height:80px;padding:10px;border:1px solid var(--line);bo
 <header class="topbar" id="topbar">
   <h1>Copacking</h1>
   <span class="who" id="who"></span>
+  <button type="button" id="btnInstall" class="hidden" title="Instalează aplicația pe telefon">⬇ Instalează</button>
   <button type="button" id="btnPin" class="hidden" title="Schimbă PIN-ul">PIN</button>
   <button type="button" id="btnLogout" class="hidden">Ieșire</button>
 </header>
@@ -1671,6 +1675,20 @@ setInterval(() => {
   if (state.view === "operator") updateCardsDyn();
   if (state.view === "supervizor") renderSupervisor();
 }, 5000);
+/* PWA: service worker (network-first) + buton „Instalează” pe Android/desktop Chrome/Edge */
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(e => console.warn("sw:", e)));
+}
+let installPrompt = null;
+window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPrompt = e; $("#btnInstall").classList.remove("hidden"); });
+$("#btnInstall").addEventListener("click", async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  try { await installPrompt.userChoice; } catch (_) {}
+  installPrompt = null; $("#btnInstall").classList.add("hidden");
+});
+window.addEventListener("appinstalled", () => { $("#btnInstall").classList.add("hidden"); showMsg("Aplicația a fost instalată pe ecranul de start.", "info"); });
+
 window.addEventListener("online", () => showMsg("Conexiune restabilită – datele în așteptare se trimit.", "info"));
 window.addEventListener("offline", () => showMsg("Ești offline. Poți continua; datele se salvează local și se trimit când revine conexiunea.", "warn"));
 </script>
