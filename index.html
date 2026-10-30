@@ -186,7 +186,8 @@ tr.gallery-row td{white-space:normal;background:var(--bg)}
 .msgmodal .text{font-size:20px;line-height:1.35;white-space:pre-wrap;word-break:break-word;margin:6px 0 14px}
 textarea{width:100%;min-height:80px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--input);color:var(--text);font-size:16px;font-family:inherit;resize:vertical}
 .sentlist{list-style:none;padding:0;margin:10px 0 0;display:flex;flex-direction:column;gap:6px}
-.sentlist li{font-size:14px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+.sentlist li{font-size:14px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);display:flex;gap:10px;align-items:center}
+.sentlist li .mtext{flex:1;min-width:0;white-space:pre-wrap;word-break:break-word}
 .sentlist li small{display:block;color:var(--muted)}
 
 /* planificare */
@@ -324,8 +325,11 @@ textarea{width:100%;min-height:80px;padding:10px;border:1px solid var(--line);bo
 
 <!-- ===================== SUPERVIZOR ===================== -->
 <section id="screen-supervizor" class="hidden">
-  <form class="card" id="msgForm" autocomplete="off" style="margin-bottom:12px">
-    <h3>Mesaj către operatori</h3>
+  <div class="toolbar" style="margin:12px 0 0">
+    <button type="button" class="btn primary" id="msgOpen">✉ Mesaj către operatori <span class="cnt" id="msgCnt" style="margin-left:6px;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.25);font-size:13px">0</span></button>
+  </div>
+  <form class="card hidden" id="msgForm" autocomplete="off" style="margin:10px 0 12px">
+    <div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">Mesaj către operatori</h3><button type="button" class="btn small" id="msgClose">Închide</button></div>
     <div class="row2">
       <label class="field">Destinatar
         <select id="msgTo"><option value="all">Toți operatorii</option></select>
@@ -1618,6 +1622,9 @@ function subscribeMessages() {
     if (!state.user) return;
     state.messages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     const me = state.user.uid;
+    const ids = new Set(state.messages.map(m => m.id));
+    state.msgQueue = state.msgQueue.filter(m => ids.has(m.id));
+    if (state.msgShowing && !ids.has(state.msgShowing.id)) { $("#msgModal").classList.add("hidden"); state.msgShowing = null; }
     for (const m of state.messages) {
       const forMe = m.to === "all" || m.to === me;
       const seen = m.ack && m.ack[me];
@@ -1650,14 +1657,33 @@ function renderMsgRecipients() {
   if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
 }
 function renderSentList() {
+  $("#msgCnt").textContent = state.messages.length;
   const ul = $("#sentList"); ul.textContent = "";
   const mine = [...state.messages].reverse().slice(0, 8);
   const nameOf = uid => (state.users.find(u => u.uid === uid) || {}).name || uid.slice(0, 6);
   for (const m of mine) {
     const acks = Object.keys(m.ack || {});
-    ul.append(el("li", {}, `${m.text}`, el("small", {}, `${fmtDT(m.ts)} · ${m.from} → ${m.to === "all" ? "toți" : nameOf(m.to)} · citit de: ${acks.length ? acks.map(nameOf).join(", ") : "nimeni încă"}`)));
+    const txt = el("div", { class: "mtext" }, `${m.text}`, el("small", {}, `${fmtDT(m.ts)} · ${m.from} → ${m.to === "all" ? "toți" : nameOf(m.to)} · citit de: ${acks.length ? acks.map(nameOf).join(", ") : "nimeni încă"}`));
+    const del = el("button", { type: "button", class: "btn small", style: "color:var(--danger)", title: "Șterge mesajul (dispare și de pe telefoanele care nu l-au citit încă)" }, "🗑");
+    del.addEventListener("click", () => {
+      if (del.dataset.armed === "1") { fire(deleteDoc(doc(db, "messages", m.id)), "Mesajul a fost șters."); return; }
+      del.dataset.armed = "1"; del.classList.add("armed"); del.textContent = "Sigur? apasă din nou";
+      setTimeout(() => { del.dataset.armed = ""; del.classList.remove("armed"); del.textContent = "🗑"; }, 4000);
+    });
+    ul.append(el("li", {}, txt, del));
+  }
+  if (mine.length) {
+    const clr = el("button", { type: "button", class: "btn small", style: "align-self:flex-start" }, "Șterge toate mesajele afișate");
+    clr.addEventListener("click", () => {
+      if (clr.dataset.armed === "1") { for (const m of state.messages) fire(deleteDoc(doc(db, "messages", m.id))); showMsg("Toate mesajele au fost șterse.", "info"); return; }
+      clr.dataset.armed = "1"; clr.classList.add("armed"); clr.textContent = "Sigur? apasă din nou";
+      setTimeout(() => { clr.dataset.armed = ""; clr.classList.remove("armed"); clr.textContent = "Șterge toate mesajele afișate"; }, 4000);
+    });
+    ul.append(el("li", { style: "background:transparent;border:0;padding:0" }, clr));
   }
 }
+$("#msgOpen").addEventListener("click", () => { $("#msgForm").classList.toggle("hidden"); if (!$("#msgForm").classList.contains("hidden")) { renderSentList(); setTimeout(() => $("#msgText").focus(), 50); } });
+$("#msgClose").addEventListener("click", () => $("#msgForm").classList.add("hidden"));
 $("#msgForm").addEventListener("submit", e => {
   e.preventDefault();
   const text = $("#msgText").value.trim(); if (!text) return showMsg("Scrie mesajul.");
