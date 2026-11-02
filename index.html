@@ -34,7 +34,9 @@ window.COPACKING_CONFIG = {
   // 800 px / 0.6 → de regulă 60–120 KB per poză → ~8.000–12.000 de poze în limita gratuită de 1 GiB
   photoMaxSide: 800,
   photoQuality: 0.6,
-  photoMaxKB: 150
+  photoMaxKB: 150,
+  // Cod de confirmare cerut administratorilor la ștergerea unui PO (activ sau din arhivă)
+  deleteCode: "0000"
 };
 </script>
 
@@ -479,6 +481,20 @@ textarea{width:100%;min-height:80px;padding:10px;border:1px solid var(--line);bo
     <div class="text" id="msgModalText"></div>
     <button type="button" class="btn primary block" id="msgAck">Am citit</button>
   </div>
+</div>
+
+<div id="delModal" class="modal hidden">
+  <form class="card" id="delForm" autocomplete="off" style="border:3px solid var(--danger)">
+    <h3 style="color:var(--danger)">Confirmă ștergerea</h3>
+    <p id="delText" style="margin:0 0 10px;font-size:15px"></p>
+    <label class="field">Introdu codul de ștergere
+      <input id="delCode" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" required placeholder="••••">
+    </label>
+    <div class="actions">
+      <button type="button" class="btn" id="delCancel">Renunță</button>
+      <button type="submit" class="btn danger" id="delOk">Șterge definitiv</button>
+    </div>
+  </form>
 </div>
 
 <div id="pinModal" class="modal hidden">
@@ -1339,6 +1355,27 @@ async function deleteOpenPO(p) {
     showMsg(`PO ${p.po} a fost șters (${evs.size} evenimente${evs.docs.filter(d => d.data().asset).length ? ", inclusiv pozele" : ""}).`, "info");
   } catch (e) { showMsg("Ștergerea a eșuat: " + errText(e)); }
 }
+/* fereastră de confirmare cu cod pentru ștergeri (codul din COPACKING_CONFIG.deleteCode) */
+let delResolve = null;
+function confirmDelete(text) {
+  return new Promise(res => {
+    delResolve = res;
+    $("#delText").textContent = text;
+    $("#delCode").value = "";
+    $("#delModal").classList.remove("hidden");
+    setTimeout(() => $("#delCode").focus(), 50);
+  });
+}
+function closeDel(result) { $("#delModal").classList.add("hidden"); if (delResolve) { const r = delResolve; delResolve = null; r(result); } }
+$("#delCancel").addEventListener("click", () => closeDel(false));
+$("#delModal").addEventListener("click", e => { if (e.target === $("#delModal")) closeDel(false); });
+$("#delForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const code = $("#delCode").value.trim();
+  if (code !== String(CFG.deleteCode ?? "0000")) { showMsg("Cod de ștergere greșit."); $("#delCode").value = ""; $("#delCode").focus(); return; }
+  closeDel(true);
+});
+
 /* ștergere PO închis din arhivă – doar administratori: șterge documentul din archive + toate evenimentele și pozele din jurnal */
 async function deleteArchivedPO(a) {
   if (!isAdmin()) return showMsg("Doar un administrator poate șterge un PO din arhivă.");
@@ -1357,15 +1394,17 @@ async function deleteArchivedPO(a) {
     showMsg(`PO ${a.po} a fost șters din arhivă împreună cu ${assets.size} poze.`, "info");
   } catch (e) { showMsg("Ștergerea a eșuat: " + errText(e)); }
 }
-function armDeleteArchived(btn, a) {
-  if (btn.dataset.armed === "1") { btn.dataset.armed = ""; btn.classList.remove("armed"); btn.textContent = "🗑 Șterge"; clearTimeout(btn._t); btn.disabled = true; deleteArchivedPO(a).finally(() => { btn.disabled = false; }); return; }
-  btn.dataset.armed = "1"; btn.classList.add("armed"); btn.textContent = "Apasă din nou – se șterg PO-ul și pozele";
-  clearTimeout(btn._t); btn._t = setTimeout(() => { btn.dataset.armed = ""; btn.classList.remove("armed"); btn.textContent = "🗑 Șterge"; }, 5000);
+async function armDeleteArchived(btn, a) {
+  if (!isAdmin()) return showMsg("Doar un administrator poate șterge un PO din arhivă.");
+  const ok = await confirmDelete(`PO ${a.po} (închis ${fmtDT(a.end)}) va fi șters din arhivă împreună cu toate pozele lui. Acțiunea nu poate fi anulată.`);
+  if (!ok) return;
+  btn.disabled = true; deleteArchivedPO(a).finally(() => { btn.disabled = false; });
 }
-function armDelete(btn, p) {
-  if (btn.dataset.armed === "1") { btn.dataset.armed = ""; btn.classList.remove("armed"); btn.textContent = "🗑 Șterge PO"; clearTimeout(btn._t); btn.disabled = true; deleteOpenPO(p).finally(() => { btn.disabled = false; }); return; }
-  btn.dataset.armed = "1"; btn.classList.add("armed"); btn.textContent = "Apasă din nou – se șterge definitiv";
-  clearTimeout(btn._t); btn._t = setTimeout(() => { btn.dataset.armed = ""; btn.classList.remove("armed"); btn.textContent = "🗑 Șterge PO"; }, 5000);
+async function armDelete(btn, p) {
+  if (!isAdmin()) return showMsg("Doar un administrator poate șterge un PO.");
+  const ok = await confirmDelete(`PO ${p.po} (activ, ${p.verified}/${p.target} verificate, ${p.photos.length} poze) va fi șters complet. Acțiunea nu poate fi anulată.`);
+  if (!ok) return;
+  btn.disabled = true; deleteOpenPO(p).finally(() => { btn.disabled = false; });
 }
 
 /* istoric – ascuns sub buton, cu filtru pe dată (implicit: azi) */
