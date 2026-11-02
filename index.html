@@ -181,6 +181,11 @@ tr.gallery-row td{white-space:normal;background:var(--bg)}
 #lightbox img{max-width:100%;max-height:82vh;object-fit:contain;border-radius:6px}
 #lightbox .cap{color:#ddd;font-size:14px;margin-top:10px;text-align:center}
 #lightbox .lb-close{position:absolute;top:calc(12px + env(safe-area-inset-top));right:12px;width:48px;height:48px;border-radius:50%;border:0;background:rgba(255,255,255,.2);color:#fff;font-size:26px}
+#lightbox .lb-nav{position:absolute;top:50%;transform:translateY(-50%);width:56px;height:72px;border:0;border-radius:12px;background:rgba(255,255,255,.18);color:#fff;font-size:34px;line-height:1;cursor:pointer}
+#lightbox .lb-nav:disabled{opacity:.25;cursor:default}
+#lightbox .lb-prev{left:8px}#lightbox .lb-next{right:8px}
+#lightbox .lb-count{position:absolute;top:calc(22px + env(safe-area-inset-top));left:16px;color:#ddd;font-size:14px;background:rgba(0,0,0,.4);padding:4px 10px;border-radius:999px}
+@media (max-width:640px){#lightbox .lb-nav{width:44px;height:64px;font-size:28px}}
 
 /* mesaje supervizor → operatori */
 .msgmodal .card{border:3px solid var(--accent)}
@@ -518,6 +523,9 @@ textarea{width:100%;min-height:80px;padding:10px;border:1px solid var(--line);bo
 
 <div id="lightbox" class="hidden">
   <button type="button" class="lb-close" id="lbClose" aria-label="Închide">×</button>
+  <span class="lb-count" id="lbCount"></span>
+  <button type="button" class="lb-nav lb-prev" id="lbPrev" aria-label="Poza anterioară">‹</button>
+  <button type="button" class="lb-nav lb-next" id="lbNext" aria-label="Poza următoare">›</button>
   <img id="lbImg" alt="">
   <div class="cap" id="lbCap"></div>
 </div>
@@ -643,29 +651,57 @@ function csvDownload(filename, rows) {
 /* Lightbox                                                            */
 /* ------------------------------------------------------------------ */
 const lb = $("#lightbox"), lbImg = $("#lbImg"), lbCap = $("#lbCap");
-async function openLightbox(asset, thumb, caption) {
-  lbImg.src = thumb || "";
-  lbCap.textContent = (caption || "") + (asset ? " · se încarcă poza completă…" : "");
+/* lightbox cu navigare: list = [{asset, url, caption}], idx = poza curentă; săgeți stânga/dreapta, taste ←/→, swipe pe telefon */
+let lbList = [], lbIdx = 0, lbSeq = 0;
+async function openLightbox(asset, thumb, caption, list = null, idx = 0) {
+  if (list && list.length) { lbList = list; lbIdx = Math.max(0, Math.min(idx, list.length - 1)); }
+  else { lbList = [{ asset, url: thumb, caption }]; lbIdx = 0; }
   lb.classList.remove("hidden");
-  if (!asset) { lbCap.textContent = caption || ""; return; }
+  await showLbItem();
+}
+async function showLbItem() {
+  const it = lbList[lbIdx]; if (!it) return;
+  const seq = ++lbSeq;
+  const many = lbList.length > 1;
+  $("#lbPrev").classList.toggle("hidden", !many); $("#lbNext").classList.toggle("hidden", !many);
+  $("#lbPrev").disabled = lbIdx === 0; $("#lbNext").disabled = lbIdx >= lbList.length - 1;
+  $("#lbCount").textContent = many ? `${lbIdx + 1} / ${lbList.length}` : "";
+  lbImg.src = it.url || "";
+  lbCap.textContent = (it.caption || "") + (it.asset ? " · se încarcă poza completă…" : "");
+  if (!it.asset) { lbCap.textContent = it.caption || ""; return; }
   try {
-    let data = state.photoCache.get(asset);
+    let data = state.photoCache.get(it.asset);
     if (!data) {
-      const snap = await getDoc(doc(db, "photos", asset));
+      const snap = await getDoc(doc(db, "photos", it.asset));
       if (!snap.exists()) throw new Error("Poza nu mai există.");
       data = snap.data().data;
-      state.photoCache.set(asset, data);
+      state.photoCache.set(it.asset, data);
       if (state.photoCache.size > 12) state.photoCache.delete(state.photoCache.keys().next().value);
     }
-    if (!lb.classList.contains("hidden")) { lbImg.src = data; lbCap.textContent = caption || ""; }
+    if (seq === lbSeq && !lb.classList.contains("hidden")) { lbImg.src = data; lbCap.textContent = it.caption || ""; }
   } catch (e) {
-    lbCap.textContent = (caption || "") + " · " + errText(e);
+    if (seq === lbSeq) lbCap.textContent = (it.caption || "") + " · " + errText(e);
   }
 }
-function closeLightbox() { lb.classList.add("hidden"); lbImg.src = ""; }
+function lbStep(d) { const n = lbIdx + d; if (n < 0 || n >= lbList.length) return; lbIdx = n; showLbItem(); }
+function closeLightbox() { lb.classList.add("hidden"); lbImg.src = ""; lbList = []; }
 $("#lbClose").addEventListener("click", closeLightbox);
+$("#lbPrev").addEventListener("click", e => { e.stopPropagation(); lbStep(-1); });
+$("#lbNext").addEventListener("click", e => { e.stopPropagation(); lbStep(1); });
 lb.addEventListener("click", e => { if (e.target === lb || e.target === lbImg) closeLightbox(); });
-document.addEventListener("keydown", e => { if (e.key === "Escape") closeLightbox(); });
+document.addEventListener("keydown", e => {
+  if (lb.classList.contains("hidden")) return;
+  if (e.key === "Escape") closeLightbox();
+  else if (e.key === "ArrowLeft") lbStep(-1);
+  else if (e.key === "ArrowRight") lbStep(1);
+});
+let swipeX = null;
+lb.addEventListener("touchstart", e => { swipeX = e.touches[0].clientX; }, { passive: true });
+lb.addEventListener("touchend", e => { if (swipeX === null) return; const dx = e.changedTouches[0].clientX - swipeX; swipeX = null; if (Math.abs(dx) > 50) lbStep(dx < 0 ? 1 : -1); }, { passive: true });
+/* lista de poze a unui PO, pentru navigare */
+function photoList(photos, poLabel) {
+  return photos.map(x => ({ asset: x.asset || x.id, url: x.url, caption: `${poLabel} · ${fmtDT(x.ts)} · ${x.op || ""}${x.code ? " · " + x.code : ""}` }));
+}
 
 /* ------------------------------------------------------------------ */
 /* Navigare                                                            */
@@ -1429,7 +1465,10 @@ function renderHistory() {
     const li = el("li");
     if (l.type === "photo") {
       const img = el("img", { class: "thumb", src: l.url || "", alt: "poză", loading: "lazy" });
-      img.addEventListener("click", () => openLightbox(l.asset, l.url, `PO ${l.po} · ${fmtDT(l.ts)} · ${l.op || ""}${l.code ? " · " + l.code : ""}`));
+      img.addEventListener("click", () => {
+        const same = state.logs.filter(x => x.type === "photo" && x.sid === l.sid).sort((a, b) => a.ts - b.ts);
+        openLightbox(null, null, null, photoList(same, `PO ${l.po}`), Math.max(0, same.findIndex(x => x.id === l.id)));
+      });
       li.append(img);
     } else li.append(el("div", { class: "thumb ph" }, "fără poză"));
     li.append(el("div", { class: "info" },
@@ -1460,11 +1499,12 @@ $("#supFilters").addEventListener("click", e => {
 function galleryFor(photos, poLabel) {
   const g = el("div", { class: "gallery" });
   if (!photos.length) g.append(el("span", { class: "muted" }, "Nicio poză."));
-  for (const x of photos) {
+  const list = photoList(photos, poLabel);
+  photos.forEach((x, i) => {
     const img = el("img", { src: x.url || "", alt: "poză", loading: "lazy" });
-    img.addEventListener("click", ev => { ev.stopPropagation(); openLightbox(x.asset || x.id, x.url, `${poLabel} · ${fmtDT(x.ts)} · ${x.op || ""}${x.code ? " · " + x.code : ""}`); });
+    img.addEventListener("click", ev => { ev.stopPropagation(); openLightbox(null, null, null, list, i); });
     g.append(el("figure", {}, img, el("figcaption", {}, `${fmtTime(x.ts)} · +${x.n || 0}${x.code ? " · " + x.code : ""}`)));
-  }
+  });
   return g;
 }
 function progressCell(verified, target, qty, pct) {
