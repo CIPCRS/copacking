@@ -451,6 +451,27 @@ textarea{width:100%;min-height:80px;padding:10px;border:1px solid var(--line);bo
   <div class="planlist" id="plansList"></div>
 </section>
 
+<!-- ===================== ACTIVITATE UTILIZATORI (supervizor/admin) ===================== -->
+<section id="screen-activitate" class="hidden">
+  <div class="kpis" id="actKpis"></div>
+  <div class="toolbar">
+    <input id="actFrom" type="date" title="De la">
+    <input id="actTo" type="date" title="Până la">
+    <button class="btn small" type="button" id="actToday">Azi</button>
+    <button class="btn small" type="button" id="act7">7 zile</button>
+    <select id="actUser"><option value="">Toți utilizatorii</option></select>
+    <button class="btn small" type="button" id="btnCsvAct">⬇ Export Excel</button>
+    <small id="actInfo"></small>
+  </div>
+  <div class="tablewrap">
+    <table id="actTable">
+      <thead><tr><th>Utilizator</th><th>Rol</th><th>Intrare</th><th>Ieșire</th><th>Durată</th><th>Stare</th><th>Dispozitiv</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <p class="small muted" style="font-size:13px;margin-top:8px">Intrarea se înregistrează automat când utilizatorul deschide aplicația autentificat (sau o aduce în față); ieșirea, când o închide, trece pe alt ecran sau apasă „Ieșire”. O revenire în mai puțin de 10 minute continuă același rând. Cât timp aplicația e pe ecran trimite un puls la 2 minute; dacă dispozitivul rămâne fără net sau se oprește brusc, rândul arată „(ultima activitate)”.</p>
+</section>
+
 <!-- ===================== UTILIZATORI (admin) ===================== -->
 <section id="screen-utilizatori" class="hidden">
   <h2>Utilizator nou</h2>
@@ -562,7 +583,8 @@ const state = {
   expanded: new Set(), arqExpanded: new Set(),
   pendingSid: null, unsub: {}, photoCache: new Map(), interval: null,
   messages: [], msgQueue: [], msgShowing: null,
-  plans: [], planFilter: "planned", xlsRows: []
+  plans: [], planFilter: "planned", xlsRows: [],
+  sessions: [], sessionId: null, hb: null
 };
 
 /* ------------------------------------------------------------------ */
@@ -582,6 +604,7 @@ function el(tag, attrs = {}, ...children) {
   return n;
 }
 const pad = n => String(n).padStart(2, "0");
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 function fmtTime(ts) { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
 function fmtDT(ts) { if (!ts) return "–"; const d = new Date(ts); return `${pad(d.getDate())}.${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
 function fmtDTfull(ts) { if (!ts) return ""; const d = new Date(ts); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }
@@ -711,6 +734,7 @@ const VIEWS = {
   supervizor:  { label: "Supervizor",  allowed: canSup },
   planificare: { label: "Planificare", allowed: canSup },
   arhiva:      { label: "Arhivă",      allowed: canSup },
+  activitate:  { label: "👣 Activitate", allowed: isAdmin },
   utilizatori: { label: "Utilizatori", allowed: isAdmin }
 };
 function viewFromHash() {
@@ -737,6 +761,7 @@ function setView(v) {
   if (v === "operator") renderOperator();
   if (v === "supervizor") { renderSupervisor(); renderSentList(); }
   if (v === "planificare") { if (!$("#plDate").value) $("#plDate").value = todayStr(); renderPlans(); }
+  if (v === "activitate") { subscribeSessions(); renderSessions(); }
   if (v === "arhiva") { subscribeArchive(); renderArchive(); }
   if (v === "utilizatori") { subscribeUsers(); renderUsers(); }
 }
@@ -761,7 +786,133 @@ $("#loginForm").addEventListener("submit", async e => {
     showMsg(errText(err));
   } finally { btn.disabled = false; btn.textContent = "Intră"; }
 });
-$("#btnLogout").addEventListener("click", () => signOut(auth));
+$("#btnLogout").addEventListener("click", async () => { await endSession("logout"); signOut(auth); });
+
+/* ------------------------------------------------------------------ */
+/* Jurnal de prezență (colecția sessions): intrare automată, heartbeat, ieșire */
+/* ------------------------------------------------------------------ */
+const HB_MS = 2 * 60000, ONLINE_MS = 5 * 60000, RESUME_MS = 10 * 60000;   // puls la 2 min; „activ acum” sub 5 min; revenire în <10 min = același rând
+function deviceLabel() {
+  const ua = navigator.userAgent;
+  const os = /iPhone|iPad/.test(ua) || (/Mac/.test(ua) && navigator.maxTouchPoints > 1) ? "iOS" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Mac/.test(ua) ? "Mac" : "alt";
+  const kind = /iPad/.test(ua) || (/Mac/.test(ua) && navigator.maxTouchPoints > 1) || (/Android/.test(ua) && !/Mobile/.test(ua)) ? "tabletă" : /iPhone|Android/.test(ua) ? "telefon" : "desktop";
+  const br = /Edg\//.test(ua) ? "Edge" : /SamsungBrowser/.test(ua) ? "Samsung" : /Chrome\//.test(ua) && !/Edg\//.test(ua) ? "Chrome" : /Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "browser";
+  const pwa = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || navigator.standalone ? " · app" : "";
+  return `${os} ${kind} · ${br}${pwa}`;
+}
+function sessWrite(data) { return state.sessionId ? updateDoc(doc(db, "sessions", state.sessionId), data).catch(() => {}) : Promise.resolve(); }
+async function startSession() {
+  const now = Date.now();
+  try {
+    // revenire rapidă (ecran stins, altă aplicație, reîncărcare) → continuăm rândul anterior dacă s-a închis acum < 10 min
+    const prev = sessionStorage.getItem("cp_session") || localStorage.getItem("cp_session");
+    if (prev) {
+      const [sid, uid, closedAt] = prev.split("|");
+      if (uid === state.user.uid && now - Number(closedAt || 0) < RESUME_MS) {
+        state.sessionId = sid;
+        await updateDoc(doc(db, "sessions", sid), { last: now, logout: null, reason: "" }).catch(() => { state.sessionId = null; });
+      }
+    }
+    if (!state.sessionId) {
+      const ref = await addDoc(collection(db, "sessions"), { uid: state.user.uid, name: state.profile.name, role: state.profile.role, login: now, last: now, logout: null, reason: "", device: deviceLabel() });
+      state.sessionId = ref.id;
+    }
+    const tag = state.sessionId + "|" + state.user.uid + "|" + now;
+    sessionStorage.setItem("cp_session", tag); localStorage.setItem("cp_session", tag);
+  } catch (e) { console.warn("session:", e); }
+  clearInterval(state.hb);
+  state.hb = setInterval(() => { if (document.visibilityState === "visible") { sessWrite({ last: Date.now() }); const t = (localStorage.getItem("cp_session") || "").split("|"); if (t[0] === state.sessionId) localStorage.setItem("cp_session", `${t[0]}|${t[1]}|${Date.now()}`); } }, HB_MS);
+}
+/* ieșire: la „Ieșire”, la închiderea aplicației sau când trece în fundal; rândul poate fi reluat la revenire în < 10 min */
+function pauseSession(reason) {
+  if (!state.sessionId) return;
+  const now = Date.now();
+  sessWrite({ logout: now, last: now, reason });
+  localStorage.setItem("cp_session", `${state.sessionId}|${state.user ? state.user.uid : ""}|${now}`);
+}
+async function endSession(reason) {
+  clearInterval(state.hb); state.hb = null;
+  const sid = state.sessionId; if (!sid) return;
+  const now = Date.now();
+  state.sessionId = null; sessionStorage.removeItem("cp_session"); localStorage.removeItem("cp_session");
+  try { await updateDoc(doc(db, "sessions", sid), { logout: now, last: now, reason }); } catch (_) {}
+}
+document.addEventListener("visibilitychange", () => {
+  if (!state.user || !state.profile) return;
+  if (document.visibilityState === "hidden") pauseSession("fundal");
+  else if (state.sessionId) sessWrite({ last: Date.now(), logout: null, reason: "" });
+  else startSession();
+});
+window.addEventListener("pagehide", () => pauseSession("închis"));
+
+function subscribeSessions() {
+  if (state.unsub.sessions) return;
+  const q = query(collection(db, "sessions"), where("login", ">=", Date.now() - 60 * 86400000), orderBy("login", "desc"), limit(3000));
+  state.unsub.sessions = onSnapshot(q, snap => {
+    if (!state.user) return;
+    state.sessions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderSessions();
+  }, err => showMsg("Eroare la citirea jurnalului de activitate: " + errText(err)));
+}
+{ const d7 = new Date(Date.now() - 6 * 86400000); $("#actFrom").value = `${d7.getFullYear()}-${pad(d7.getMonth() + 1)}-${pad(d7.getDate())}`; $("#actTo").value = todayStr(); }
+["#actFrom", "#actTo", "#actUser"].forEach(sel => $(sel).addEventListener("input", renderSessions));
+$("#actToday").addEventListener("click", () => { $("#actFrom").value = todayStr(); $("#actTo").value = todayStr(); renderSessions(); });
+$("#act7").addEventListener("click", () => { const d = new Date(Date.now() - 6 * 86400000); $("#actFrom").value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; $("#actTo").value = todayStr(); renderSessions(); });
+function sessionEnd(x) { return x.logout || x.last || x.login; }
+function sessionState(x, now) {
+  if (!x.logout && now - (x.last || x.login) < ONLINE_MS) return ["activ acum", "run"];
+  if (x.logout) return [x.reason === "logout" ? "ieșit" : x.reason === "dezactivat" ? "dezactivat" : "închis", "done"];
+  return ["întrerupt (ultima activitate)", "warn"];
+}
+function sessionsFiltered() {
+  const from = $("#actFrom").value ? new Date($("#actFrom").value + "T00:00:00").getTime() : null;
+  const to = $("#actTo").value ? new Date($("#actTo").value + "T23:59:59.999").getTime() : null;
+  const u = $("#actUser").value;
+  return state.sessions.filter(x => (!from || x.login >= from) && (!to || x.login <= to) && (!u || x.uid === u));
+}
+function renderSessions() {
+  if (state.view !== "activitate") return;
+  const now = Date.now();
+  // lista utilizatorilor în filtru
+  const sel = $("#actUser"), cur = sel.value; const names = new Map(); for (const x of state.sessions) names.set(x.uid, x.name);
+  sel.textContent = ""; sel.append(el("option", { value: "" }, "Toți utilizatorii"));
+  for (const [uid, name] of [...names.entries()].sort((a, b) => String(a[1]).localeCompare(b[1]))) sel.append(el("option", { value: uid }, name));
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+  const list = sessionsFiltered();
+  const online = new Map(); for (const x of state.sessions) if (!x.logout && now - (x.last || x.login) < ONLINE_MS) online.set(x.uid, x.name);
+  const today = list.filter(x => x.login >= new Date(todayStr() + "T00:00:00").getTime());
+  const k = $("#actKpis"); k.textContent = "";
+  k.append(el("div", { class: "kpi" }, el("b", {}, online.size), el("span", {}, "activi acum" + (online.size ? ": " + [...online.values()].join(", ") : ""))),
+    el("div", { class: "kpi" }, el("b", {}, new Set(list.map(x => x.uid)).size), el("span", {}, "utilizatori distincți în perioada aleasă")),
+    el("div", { class: "kpi" }, el("b", {}, list.length), el("span", {}, "intrări în perioada aleasă")),
+    el("div", { class: "kpi" }, el("b", {}, fmtDur(list.reduce((s, x) => s + (sessionEnd(x) - x.login), 0))), el("span", {}, "timp total în aplicație")));
+  $("#actInfo").textContent = `${list.length} înregistrări · actualizat ${fmtTime(now)}`;
+  const tb = $("#actTable tbody"); tb.textContent = "";
+  if (!list.length) { tb.append(el("tr", {}, el("td", { colspan: 7, class: "empty" }, "Nicio intrare în perioada aleasă."))); return; }
+  for (const x of list) {
+    const [st, cls] = sessionState(x, now);
+    tb.append(el("tr", {}, el("td", {}, el("b", {}, x.name || "")), el("td", {}, x.role || ""), el("td", {}, fmtDT(x.login)),
+      el("td", {}, cls === "run" ? "—" : x.logout ? fmtDT(x.logout) : fmtDT(x.last) + " (ultima activitate)"),
+      el("td", {}, fmtDur(sessionEnd(x) - x.login)), el("td", {}, el("span", { class: "status " + cls }, st)), el("td", {}, x.device || "")));
+  }
+}
+$("#btnCsvAct").addEventListener("click", async () => {
+  const now = Date.now();
+  const rows = [["User", "Role", "Login", "Logout", "Duration (min)", "Status", "Device"]];
+  for (const x of sessionsFiltered()) rows.push([x.name || "", x.role || "", new Date(x.login), new Date(sessionEnd(x)), minutes(sessionEnd(x) - x.login), sessionState(x, now)[0], x.device || ""]);
+  try {
+    const X = await loadXLSX();
+    const ws = X.utils.aoa_to_sheet(rows, { cellDates: true });
+    ws["!cols"] = [{ wch: 22 }, { wch: 11 }, { wch: 18 }, { wch: 18 }, { wch: 13 }, { wch: 26 }, { wch: 28 }];
+    for (let r = 1; r < rows.length; r++) for (const c of ["C", "D"]) { const cell = ws[c + (r + 1)]; if (cell) cell.z = "dd.mm.yyyy hh:mm"; }
+    ws["!autofilter"] = { ref: `A1:G${rows.length}` };
+    const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, "Activitate");
+    X.writeFile(wb, `copacking_activitate_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  } catch (e) {
+    // fără internet pentru biblioteca Excel → CSV
+    csvDownload(`copacking_activitate_${new Date().toISOString().slice(0, 10)}.csv`, rows.map(r => r.map(v => v instanceof Date ? fmtDTfull(v.getTime()) : v)));
+  }
+});
 
 /* schimbare PIN (utilizatorul curent) */
 const pinModal = $("#pinModal");
@@ -811,7 +962,7 @@ onAuthStateChanged(auth, user => {
       // profil lipsă / inactiv: decidem doar pe baza răspunsului serverului, nu a cache-ului local
       if (snap.metadata.fromCache) return;
       showMsg("Contul nu este autorizat sau a fost dezactivat. Contactează un administrator.");
-      signOut(auth);
+      endSession("dezactivat").finally(() => signOut(auth));
       return;
     }
     const first = !state.profile;
@@ -823,6 +974,7 @@ onAuthStateChanged(auth, user => {
 });
 
 function enterApp() {
+  startSession();
   $("#btnLogout").classList.remove("hidden");
   $("#btnPin").classList.remove("hidden");
   subscribeSettings();
@@ -1444,7 +1596,6 @@ async function armDelete(btn, p) {
 }
 
 /* istoric – ascuns sub buton, cu filtru pe dată (implicit: azi) */
-const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 $("#histFrom").value = todayStr(); $("#histTo").value = todayStr();
 $("#histToday").addEventListener("click", () => { $("#histFrom").value = todayStr(); $("#histTo").value = todayStr(); renderHistory(); });
 $("#histAll").addEventListener("click", () => { $("#histFrom").value = ""; $("#histTo").value = ""; renderHistory(); });
@@ -1779,6 +1930,7 @@ setInterval(() => {
   if (!state.profile) return;
   if (state.view === "operator") updateCardsDyn();
   if (state.view === "supervizor") renderSupervisor();
+  if (state.view === "activitate") renderSessions();
 }, 5000);
 /* PWA: service worker (network-first) + buton „Instalează” pe Android/desktop Chrome/Edge */
 if ("serviceWorker" in navigator && location.protocol === "https:") {
