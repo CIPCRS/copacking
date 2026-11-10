@@ -461,6 +461,7 @@ textarea{width:100%;min-height:80px;padding:10px;border:1px solid var(--line);bo
     <button class="btn small" type="button" id="act7">7 zile</button>
     <select id="actUser"><option value="">Toți utilizatorii</option></select>
     <button class="btn small" type="button" id="btnCsvAct">⬇ Export Excel</button>
+    <label style="display:flex;align-items:center;gap:6px;font-size:14px;min-height:40px"><input type="checkbox" id="actRecon" checked style="width:20px;height:20px;min-height:0"> Include activitatea reconstruită din jurnal (înainte de pornirea acestui jurnal)</label>
     <small id="actInfo"></small>
   </div>
   <div class="tablewrap">
@@ -856,25 +857,42 @@ function subscribeSessions() {
 }
 { const d7 = new Date(Date.now() - 6 * 86400000); $("#actFrom").value = `${d7.getFullYear()}-${pad(d7.getMonth() + 1)}-${pad(d7.getDate())}`; $("#actTo").value = todayStr(); }
 ["#actFrom", "#actTo", "#actUser"].forEach(sel => $(sel).addEventListener("input", renderSessions));
+$("#actRecon").addEventListener("change", renderSessions);
 $("#actToday").addEventListener("click", () => { $("#actFrom").value = todayStr(); $("#actTo").value = todayStr(); renderSessions(); });
 $("#act7").addEventListener("click", () => { const d = new Date(Date.now() - 6 * 86400000); $("#actFrom").value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; $("#actTo").value = todayStr(); renderSessions(); });
 function sessionEnd(x) { return x.logout || x.last || x.login; }
 function sessionState(x, now) {
+  if (x.recon) return ["estimat din jurnal", "warn"];
   if (!x.logout && now - (x.last || x.login) < ONLINE_MS) return ["activ acum", "run"];
   if (x.logout) return [x.reason === "logout" ? "ieșit" : x.reason === "dezactivat" ? "dezactivat" : "închis", "done"];
   return ["întrerupt (ultima activitate)", "warn"];
+}
+/* activitate reconstruită din jurnal (verificări, poze, PO-uri, confirmări de mesaje, planificări pornite):
+   un rând pe utilizator și zi = prima acțiune → ultima acțiune; doar pentru zilele fără sesiuni reale ale acelui utilizator */
+function dayKey(ts) { const d = new Date(ts); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function reconstructedSessions() {
+  const acts = new Map();   // uid|zi → {uid, name, first, last, n}
+  const add = (uid, name, ts) => { if (!uid || !ts) return; const k = uid + "|" + dayKey(ts); const a = acts.get(k) || { uid, name, first: ts, last: ts, n: 0 }; a.first = Math.min(a.first, ts); a.last = Math.max(a.last, ts); a.n++; if (name) a.name = name; acts.set(k, a); };
+  for (const l of state.logs) add(l.uid, l.op, l.ts);
+  for (const m of state.messages) { add(m.fromUid, m.from, m.ts); for (const [uid, ts] of Object.entries(m.ack || {})) add(uid, null, ts); }
+  for (const pl of state.plans) { add(pl.createdUid, pl.createdBy, pl.createdAt); if (pl.startedAt) { const u = state.users.find(x => x.name === pl.startedBy); if (u) add(u.uid, pl.startedBy, pl.startedAt); } }
+  const realDays = new Set(state.sessions.map(x => x.uid + "|" + dayKey(x.login)));
+  const roleOf = uid => (state.users.find(x => x.uid === uid) || {}).role || "";
+  const nameOf = (uid, n) => n || (state.users.find(x => x.uid === uid) || {}).name || uid.slice(0, 6);
+  return [...acts.entries()].filter(([k]) => !realDays.has(k)).map(([k, a]) => ({ id: "rec|" + k, uid: a.uid, name: nameOf(a.uid, a.name), role: roleOf(a.uid), login: a.first, last: a.last, logout: a.last, reason: "estimat", device: `estimat din jurnal · ${a.n} acțiuni`, recon: true }));
 }
 function sessionsFiltered() {
   const from = $("#actFrom").value ? new Date($("#actFrom").value + "T00:00:00").getTime() : null;
   const to = $("#actTo").value ? new Date($("#actTo").value + "T23:59:59.999").getTime() : null;
   const u = $("#actUser").value;
-  return state.sessions.filter(x => (!from || x.login >= from) && (!to || x.login <= to) && (!u || x.uid === u));
+  const all = $("#actRecon").checked ? [...state.sessions, ...reconstructedSessions()].sort((a, b) => b.login - a.login) : state.sessions;
+  return all.filter(x => (!from || x.login >= from) && (!to || x.login <= to) && (!u || x.uid === u));
 }
 function renderSessions() {
   if (state.view !== "activitate") return;
   const now = Date.now();
   // lista utilizatorilor în filtru
-  const sel = $("#actUser"), cur = sel.value; const names = new Map(); for (const x of state.sessions) names.set(x.uid, x.name);
+  const sel = $("#actUser"), cur = sel.value; const names = new Map(); for (const x of [...state.sessions, ...($("#actRecon").checked ? reconstructedSessions() : [])]) names.set(x.uid, x.name);
   sel.textContent = ""; sel.append(el("option", { value: "" }, "Toți utilizatorii"));
   for (const [uid, name] of [...names.entries()].sort((a, b) => String(a[1]).localeCompare(b[1]))) sel.append(el("option", { value: uid }, name));
   if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
